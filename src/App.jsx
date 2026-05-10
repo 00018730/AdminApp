@@ -53,7 +53,7 @@ function Login({ onLogin }) {
       </div>
 
       {/* Right login panel */}
-      <div style={{ width:'440px', flexShrink:0, background:'white', display:'flex', alignItems:'center', justifyContent:'center', padding:'48px 40px', boxShadow:'-20px 0 60px rgba(0,0,0,0.2)' }}>
+      <div style={{ width:'480px', flexShrink:0, background:'white', display:'flex', alignItems:'center', justifyContent:'center', padding:'48px 40px', boxShadow:'-20px 0 60px rgba(0,0,0,0.2)' }}>
         <div style={{ width:'100%' }}>
           <h2 style={{ fontSize:'26px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', color:D, letterSpacing:'-0.3px', marginBottom:'6px' }}>Welcome back</h2>
           <p style={{ fontSize:'14px', color:'#94a3b8', marginBottom:'32px' }}>Sign in to the admin panel</p>
@@ -66,7 +66,7 @@ function Login({ onLogin }) {
           <div style={{ position:'relative', marginBottom:'6px' }}>
             <input type={showPw?'text':'password'} value={password} onChange={e => { setPassword(e.target.value); setError('') }} onKeyDown={e => e.key==='Enter' && handle()} placeholder="Enter password"
               style={{ width:'100%', padding:'13px 44px 13px 16px', borderRadius:'10px', border:`1.5px solid ${error?'#fca5a5':'#e4e8e7'}`, fontSize:'15px', outline:'none', color:D, boxSizing:'border-box', fontFamily:"'DM Sans',sans-serif" }} />
-            <button onClick={() => setShowPw(!showPw)} style={{ position:'absolute', right:'12px', top:'50%', transform:'translateY(-50%)', background:'none', border:'none', cursor:'pointer', fontSize:'18px', lineHeight:1 }}>{showPw?'🙈':'👁'}</button>
+            <button onClick={() => setShowPw(!showPw)} style={{ position:'absolute', right:'12px', top:'50%', transform:'translateY(-50%)', background:'white', border:'none', cursor:'pointer', fontSize:'18px', lineHeight:1 }}>{showPw?'🙈':'👁'}</button>
           </div>
 
           {error && <p style={{ fontSize:'13px', color:'#dc2626', marginBottom:'14px', fontWeight:'500' }}>⚠️ {error}</p>}
