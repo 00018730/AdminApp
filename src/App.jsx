@@ -3,7 +3,7 @@ import StudentsSection from './StudentsSection'
 import PaymentsSection from './PaymentsSection'
 import TestsSection from './TestsSection'
 import ParentsSection from './ParentsSection'
-import TeachersSection from './TeachersSection'
+import TeachersSection from './TeachersSection.jsx'
 import AnnouncementsSection from './AnnouncementsSection'
 
 const G = '#009472'
