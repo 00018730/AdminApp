@@ -17,8 +17,6 @@ const downloadCheque = (payment, studentName) => {
   URL.revokeObjectURL(url)
 }
 
-const [prefilledStudent, setPrefilledStudent] = useState(null)
-
 function PaymentForm({ teachers, students, payments, month, editPayment, prefilledStudent, onSave, onClose }) {
   const [payStudent, setPayStudent] = useState(editPayment?.student_username || '')
   const [payTeacher, setPayTeacher] = useState('')
@@ -30,7 +28,6 @@ function PaymentForm({ teachers, students, payments, month, editPayment, prefill
   const [payNotes, setPayNotes]     = useState(editPayment?.notes || '')
   const [saving, setSaving]         = useState(false)
 
-  // Pre-fill teacher/group when editing
   useEffect(() => {
     if (editPayment?.student_username) {
       const s = students.find(s => s.username === editPayment.student_username)
@@ -42,12 +39,12 @@ function PaymentForm({ teachers, students, payments, month, editPayment, prefill
   }, [editPayment])
 
   useEffect(() => {
-  if (prefilledStudent) {
-    setPayTeacher(prefilledStudent.teacher_username)
-    setPayGroup(`${prefilledStudent.day}-${prefilledStudent.class_time}`)
-    setPayStudent(prefilledStudent.username)
-  }
-}, [prefilledStudent])
+    if (prefilledStudent) {
+      setPayTeacher(prefilledStudent.teacher_username)
+      setPayGroup(`${prefilledStudent.day}-${prefilledStudent.class_time}`)
+      setPayStudent(prefilledStudent.username)
+    }
+  }, [prefilledStudent])
 
   const save = async () => {
     if (!payStudent) { alert('Select a student!'); return }
@@ -119,7 +116,7 @@ function PaymentForm({ teachers, students, payments, month, editPayment, prefill
 
         {editPayment && (
           <div style={{ background:`${G}08`, borderRadius:'10px', padding:'12px 14px', marginBottom:'14px', fontSize:'14px', fontWeight:'600', color:D }}>
-            Student: {students.find(s=>s.username===editPayment.student_username)?.full_name || editPayment.student_username}
+            Student: {students.find(s => s.username===editPayment.student_username)?.full_name || editPayment.student_username}
           </div>
         )}
 
@@ -157,7 +154,7 @@ function PaymentForm({ teachers, students, payments, month, editPayment, prefill
         <div style={{ display:'flex', gap:'10px', marginTop:'8px' }}>
           <button onClick={onClose} style={{ flex:1, padding:'12px', borderRadius:'8px', border:'1.5px solid #e4e8e7', background:'white', color:'#64748b', fontSize:'14px', fontWeight:'600', cursor:'pointer' }}>Cancel</button>
           <button onClick={save} disabled={saving || (!editPayment && !payStudent)}
-            style={{ flex:1, padding:'12px', borderRadius:'8px', border:'none', background:G, color:'white', fontSize:'14px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'700', cursor:'pointer', opacity:(!editPayment && !payStudent)?.6:1 }}>
+            style={{ flex:1, padding:'12px', borderRadius:'8px', border:'none', background:G, color:'white', fontSize:'14px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'700', cursor:'pointer', opacity:(!editPayment && !payStudent) ? 0.6 : 1 }}>
             {saving ? 'Saving...' : editPayment ? 'Save changes' : 'Save payment'}
           </button>
         </div>
@@ -167,15 +164,16 @@ function PaymentForm({ teachers, students, payments, month, editPayment, prefill
 }
 
 export default function PaymentsSection() {
-  const [students, setStudents] = useState([])
-  const [teachers, setTeachers] = useState([])
-  const [payments, setPayments] = useState([])
-  const [loading, setLoading]   = useState(true)
-  const [month, setMonth]       = useState(() => new Date().toISOString().slice(0,7))
+  const [students, setStudents]           = useState([])
+  const [teachers, setTeachers]           = useState([])
+  const [payments, setPayments]           = useState([])
+  const [loading, setLoading]             = useState(true)
+  const [month, setMonth]                 = useState(() => new Date().toISOString().slice(0,7))
   const [showUnpaid, setShowUnpaid]       = useState(false)
   const [unpaidTeacher, setUnpaidTeacher] = useState(null)
   const [showForm, setShowForm]           = useState(false)
   const [editPayment, setEditPayment]     = useState(null)
+  const [prefilledStudent, setPrefilledStudent] = useState(null)
   const [search, setSearch]               = useState('')
 
   const monthOpts = Array.from({length:8},(_,i) => {
@@ -204,6 +202,20 @@ export default function PaymentsSection() {
     fetchAll()
   }
 
+  const openRecord = (student) => {
+    setPrefilledStudent(student || null)
+    setEditPayment(null)
+    setShowForm(true)
+    setShowUnpaid(false)
+    setUnpaidTeacher(null)
+  }
+
+  const closeForm = () => {
+    setShowForm(false)
+    setEditPayment(null)
+    setPrefilledStudent(null)
+  }
+
   const monthPays   = payments.filter(p => (p.payment_month||p.month) === month)
   const paidSet     = new Set(monthPays.map(p => p.student_username))
   const paidCount   = students.filter(s => paidSet.has(s.username)).length
@@ -223,13 +235,9 @@ export default function PaymentsSection() {
           </select>
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search student..." style={{ padding:'9px 12px', borderRadius:'8px', border:'1.5px solid #e4e8e7', fontSize:'13px', outline:'none', width:'180px' }} />
         </div>
-        <button onClick={() => {
-  setPrefilledStudent(s)
-  setEditPayment(null)
-  setShowForm(true)
-  setShowUnpaid(false)
-  setUnpaidTeacher(null)
-}} style={{ padding:'5px 14px', borderRadius:'6px', border:'none', background:G, color:'white', fontSize:'12px', fontWeight:'600', cursor:'pointer' }}>Record</button>
+        <button onClick={() => openRecord(null)} style={{ padding:'9px 18px', borderRadius:'8px', border:'none', background:G, color:'white', fontSize:'13px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'700', cursor:'pointer' }}>
+          + Record payment
+        </button>
       </div>
 
       {/* Stats */}
@@ -263,6 +271,7 @@ export default function PaymentsSection() {
               <button onClick={() => { setShowUnpaid(false); setUnpaidTeacher(null) }} style={{ padding:'5px 12px', borderRadius:'6px', border:'1.5px solid #e4e8e7', background:'white', color:'#64748b', fontSize:'12px', fontWeight:'600', cursor:'pointer' }}>✕</button>
             </div>
           </div>
+
           {!unpaidTeacher ? (
             <div style={{ display:'flex', flexDirection:'column', gap:'6px' }}>
               {teachers.map(t => {
@@ -284,21 +293,21 @@ export default function PaymentsSection() {
             </div>
           ) : (
             <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'14px' }}>
-              <thead><tr style={{ borderBottom:'1px solid #f0f2f1' }}>
-                {['Name','Day & Time',''].map(h => <th key={h} style={{ padding:'8px 12px', textAlign:'left', fontSize:'11px', fontWeight:'700', color:'#94a3b8', textTransform:'uppercase' }}>{h}</th>)}
-              </tr></thead>
+              <thead>
+                <tr style={{ borderBottom:'1px solid #f0f2f1' }}>
+                  {['Name','Day & Time',''].map(h => <th key={h} style={{ padding:'8px 12px', textAlign:'left', fontSize:'11px', fontWeight:'700', color:'#94a3b8', textTransform:'uppercase' }}>{h}</th>)}
+                </tr>
+              </thead>
               <tbody>
                 {students.filter(s => s.teacher_username===unpaidTeacher.username && !paidSet.has(s.username)).map((s,i) => (
                   <tr key={i} style={{ borderBottom:'1px solid #f0f2f1' }}>
                     <td style={{ padding:'10px 12px', fontWeight:'600', color:D }}>{s.full_name}</td>
                     <td style={{ padding:'10px 12px', color:'#64748b', fontSize:'13px' }}>{s.day==='odd'?'Mon/Wed/Fri':'Tue/Thu/Sat'} · {s.class_time}</td>
                     <td style={{ padding:'10px 12px' }}>
-                      <button onClick={() => {
-                        setEditPayment(null)
-                        setShowForm(true)
-                        setShowUnpaid(false)
-                        setUnpaidTeacher(null)
-                      }} style={{ padding:'5px 14px', borderRadius:'6px', border:'none', background:G, color:'white', fontSize:'12px', fontWeight:'600', cursor:'pointer' }}>Record</button>
+                      <button onClick={() => openRecord(s)}
+                        style={{ padding:'5px 14px', borderRadius:'6px', border:'none', background:G, color:'white', fontSize:'12px', fontWeight:'600', cursor:'pointer' }}>
+                        Record
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -333,35 +342,39 @@ export default function PaymentsSection() {
                 </td>
                 <td style={{ padding:'12px 16px' }}>
                   <div style={{ display:'flex', gap:'6px' }}>
-                    <button onClick={() => { setEditPayment(p); setShowForm(true) }} style={{ padding:'5px 12px', borderRadius:'6px', border:`1.5px solid ${G}`, background:`${G}10`, color:G, fontSize:'12px', fontWeight:'600', cursor:'pointer' }}>Edit</button>
+                    <button onClick={() => { setEditPayment(p); setPrefilledStudent(null); setShowForm(true) }}
+                      style={{ padding:'5px 12px', borderRadius:'6px', border:`1.5px solid ${G}`, background:`${G}10`, color:G, fontSize:'12px', fontWeight:'600', cursor:'pointer' }}>Edit</button>
                     {p.cheque_number && (
                       <button onClick={() => downloadCheque(p, p.students?.full_name||p.student_username||'')}
                         style={{ padding:'5px 12px', borderRadius:'6px', border:'1.5px solid #e4e8e7', background:'white', color:'#64748b', fontSize:'12px', fontWeight:'600', cursor:'pointer' }}>🧾</button>
                     )}
-                    <button onClick={() => deletePayment(p.id)} style={{ padding:'5px 12px', borderRadius:'6px', border:'1.5px solid #fca5a5', background:'#fef2f2', color:'#dc2626', fontSize:'12px', fontWeight:'600', cursor:'pointer' }}>✕</button>
+                    <button onClick={() => deletePayment(p.id)}
+                      style={{ padding:'5px 12px', borderRadius:'6px', border:'1.5px solid #fca5a5', background:'#fef2f2', color:'#dc2626', fontSize:'12px', fontWeight:'600', cursor:'pointer' }}>✕</button>
                   </div>
                 </td>
               </tr>
             ))}
             {!listed.length && (
-              <tr><td colSpan="6" style={{ padding:'40px', textAlign:'center', color:'#94a3b8' }}>No payments for {monthOpts.find(o=>o.val===month)?.label}</td></tr>
+              <tr><td colSpan="6" style={{ padding:'40px', textAlign:'center', color:'#94a3b8' }}>
+                No payments for {monthOpts.find(o=>o.val===month)?.label}
+              </td></tr>
             )}
           </tbody>
         </table>
       </div>
 
       {showForm && (
-  <PaymentForm
-    teachers={teachers}
-    students={students}
-    payments={payments}
-    month={month}
-    editPayment={editPayment}
-    prefilledStudent={prefilledStudent}
-    onSave={() => { fetchAll(); setShowForm(false); setEditPayment(null); setPrefilledStudent(null) }}
-    onClose={() => { setShowForm(false); setEditPayment(null); setPrefilledStudent(null) }}
-  />
-)}
+        <PaymentForm
+          teachers={teachers}
+          students={students}
+          payments={payments}
+          month={month}
+          editPayment={editPayment}
+          prefilledStudent={prefilledStudent}
+          onSave={() => { fetchAll(); closeForm() }}
+          onClose={closeForm}
+        />
+      )}
     </div>
   )
 }
