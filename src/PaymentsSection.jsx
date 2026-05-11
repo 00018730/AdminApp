@@ -17,7 +17,9 @@ const downloadCheque = (payment, studentName) => {
   URL.revokeObjectURL(url)
 }
 
-function PaymentForm({ teachers, students, payments, month, editPayment, onSave, onClose }) {
+const [prefilledStudent, setPrefilledStudent] = useState(null)
+
+function PaymentForm({ teachers, students, payments, month, editPayment, prefilledStudent, onSave, onClose }) {
   const [payStudent, setPayStudent] = useState(editPayment?.student_username || '')
   const [payTeacher, setPayTeacher] = useState('')
   const [payGroup, setPayGroup]     = useState('')
@@ -38,6 +40,14 @@ function PaymentForm({ teachers, students, payments, month, editPayment, onSave,
       }
     }
   }, [editPayment])
+
+  useEffect(() => {
+  if (prefilledStudent) {
+    setPayTeacher(prefilledStudent.teacher_username)
+    setPayGroup(`${prefilledStudent.day}-${prefilledStudent.class_time}`)
+    setPayStudent(prefilledStudent.username)
+  }
+}, [prefilledStudent])
 
   const save = async () => {
     if (!payStudent) { alert('Select a student!'); return }
@@ -213,7 +223,13 @@ export default function PaymentsSection() {
           </select>
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search student..." style={{ padding:'9px 12px', borderRadius:'8px', border:'1.5px solid #e4e8e7', fontSize:'13px', outline:'none', width:'180px' }} />
         </div>
-        <button onClick={() => { setEditPayment(null); setShowForm(true) }} style={{ padding:'9px 18px', borderRadius:'8px', border:'none', background:G, color:'white', fontSize:'13px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'700', cursor:'pointer' }}>+ Record payment</button>
+        <button onClick={() => {
+  setPrefilledStudent(s)
+  setEditPayment(null)
+  setShowForm(true)
+  setShowUnpaid(false)
+  setUnpaidTeacher(null)
+}} style={{ padding:'5px 14px', borderRadius:'6px', border:'none', background:G, color:'white', fontSize:'12px', fontWeight:'600', cursor:'pointer' }}>Record</button>
       </div>
 
       {/* Stats */}
@@ -335,16 +351,17 @@ export default function PaymentsSection() {
       </div>
 
       {showForm && (
-        <PaymentForm
-          teachers={teachers}
-          students={students}
-          payments={payments}
-          month={month}
-          editPayment={editPayment}
-          onSave={() => { fetchAll(); setShowForm(false); setEditPayment(null) }}
-          onClose={() => { setShowForm(false); setEditPayment(null) }}
-        />
-      )}
+  <PaymentForm
+    teachers={teachers}
+    students={students}
+    payments={payments}
+    month={month}
+    editPayment={editPayment}
+    prefilledStudent={prefilledStudent}
+    onSave={() => { fetchAll(); setShowForm(false); setEditPayment(null); setPrefilledStudent(null) }}
+    onClose={() => { setShowForm(false); setEditPayment(null); setPrefilledStudent(null) }}
+  />
+)}
     </div>
   )
 }
