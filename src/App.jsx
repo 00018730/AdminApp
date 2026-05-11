@@ -27,7 +27,7 @@ function Login({ onLogin }) {
   }
 
   return (
-    <div style={{ minHeight:'100vh', display:'flex', fontFamily:"'DM Sans',sans-serif", background:`linear-gradient(135deg, ${D} 0%, #003d3a 50%, ${G} 100%)` }}>
+    <div style={{ minHeight:'100vh', width:'100%', display:'flex', fontFamily:"'DM Sans',sans-serif", background:`linear-gradient(135deg, ${D} 0%, #003d3a 50%, ${G} 100%)` }}>
       {/* Left decorative panel */}
       <div style={{ flex:1, display:'flex', flexDirection:'column', justifyContent:'center', padding:'60px', display:'flex' }}>
         <div style={{ color:'white' }}>
