@@ -5,6 +5,7 @@ import TestsSection from './TestsSection'
 import ParentsSection from './ParentsSection'
 import TeachersSection from './TeachersSection.jsx'
 import AnnouncementsSection from './AnnouncementsSection'
+import HolidaysSection from './HolidaysSection'
 
 const G = '#009472'
 const D = '#002b2a'
@@ -29,7 +30,7 @@ function Login({ onLogin }) {
   return (
     <div style={{ minHeight:'100vh', width:'100%', display:'flex', fontFamily:"'DM Sans',sans-serif", background:`linear-gradient(135deg, ${D} 0%, #003d3a 50%, ${G} 100%)` }}>
       {/* Left decorative panel */}
-      <div style={{ flex:1, display:'flex', flexDirection:'column', justifyContent:'center', padding:'60px', display:'flex' }}>
+      <div style={{ flex:1, display:'flex', flexDirection:'column', justifyContent:'center', padding:'60px' }}>
         <div style={{ color:'white' }}>
           <div style={{ display:'flex', alignItems:'center', gap:'14px', marginBottom:'48px' }}>
             <div style={{ width:'48px', height:'48px', borderRadius:'14px', background:'rgba(255,255,255,0.15)', border:'2px solid rgba(255,255,255,0.3)', display:'flex', alignItems:'center', justifyContent:'center' }}>
@@ -43,7 +44,7 @@ function Login({ onLogin }) {
           <h1 style={{ fontSize:'40px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', lineHeight:'1.15', letterSpacing:'-0.5px', marginBottom:'16px' }}>Admin<br/>Dashboard</h1>
           <p style={{ fontSize:'15px', color:'rgba(255,255,255,0.65)', lineHeight:'1.6', maxWidth:'320px' }}>Manage students, payments, placement tests and parent accounts from one place.</p>
           <div style={{ display:'flex', gap:'14px', marginTop:'40px', flexWrap:'wrap' }}>
-            {[['👥','Students'],['💳','Payments'],['📝','Tests'],['👨‍👩‍👧','Parents']].map(([icon,label]) => (
+            {[['👥','Students'],['💳','Payments'],['📝','Tests'],['👨‍👩‍👧','Parents'],['🗓','Holidays']].map(([icon,label]) => (
               <div key={label} style={{ padding:'10px 16px', borderRadius:'10px', background:'rgba(255,255,255,0.1)', border:'1px solid rgba(255,255,255,0.15)', fontSize:'13px', fontWeight:'600', color:'rgba(255,255,255,0.85)', display:'flex', alignItems:'center', gap:'6px' }}>
                 {icon} {label}
               </div>
@@ -93,14 +94,23 @@ const NAV = [
   { id:'parents',  label:'Parents', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> },
   { id:'teachers', label:'Teachers', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> },
   { id:'announcements', label:'Announcements', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> },
+  { id:'holidays', label:'Holidays', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/></svg> },
 ]
 
-const TITLES = { students:'Students', payments:'Payments', tests:'Placement Tests', parents:'Parents', teachers:'Teachers', announcements:'Announcements' }
+const TITLES = {
+  students:      'Students',
+  payments:      'Payments',
+  tests:         'Placement Tests',
+  parents:       'Parents',
+  teachers:      'Teachers',
+  announcements: 'Announcements',
+  holidays:      'Holidays',
+}
 
 // ── MAIN APP ───────────────────────────────────────────────────────────────
 export default function App() {
-  const [loggedIn, setLoggedIn]   = useState(() => localStorage.getItem('slc_admin')==='true')
-  const [section, setSection]     = useState('students')
+  const [loggedIn, setLoggedIn]     = useState(() => localStorage.getItem('slc_admin')==='true')
+  const [section, setSection]       = useState('students')
   const [showLogout, setShowLogout] = useState(false)
 
   const logout = () => { localStorage.removeItem('slc_admin'); setLoggedIn(false) }
@@ -149,8 +159,8 @@ export default function App() {
           </div>
           <button onClick={() => setShowLogout(true)}
             style={{ width:'100%', padding:'10px 12px', borderRadius:'8px', border:'1px solid rgba(255,255,255,0.1)', background:'transparent', color:'rgba(255,255,255,0.35)', fontSize:'13px', fontWeight:'500', cursor:'pointer', textAlign:'left', fontFamily:"'DM Sans',sans-serif", display:'flex', alignItems:'center', gap:'8px', transition:'all 0.15s' }}
-            onMouseEnter={e => { e.currentTarget.style.color = '#ef4444'; e.currentTarget.style.borderColor = 'rgba(239,68,68,0.3)' }}
-            onMouseLeave={e => { e.currentTarget.style.color = 'rgba(255,255,255,0.35)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)' }}>
+            onMouseEnter={e => { e.currentTarget.style.color='#ef4444'; e.currentTarget.style.borderColor='rgba(239,68,68,0.3)' }}
+            onMouseLeave={e => { e.currentTarget.style.color='rgba(255,255,255,0.35)'; e.currentTarget.style.borderColor='rgba(255,255,255,0.1)' }}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
             Sign out
           </button>
@@ -169,12 +179,13 @@ export default function App() {
 
         {/* Content */}
         <main style={{ flex:1, padding:'28px 32px', overflowY:'auto' }}>
-          {section === 'students' && <StudentsSection />}
-          {section === 'payments' && <PaymentsSection />}
-          {section === 'tests'    && <TestsSection />}
-          {section === 'parents'  && <ParentsSection />}
-          {section === 'teachers' && <TeachersSection />}
+          {section === 'students'      && <StudentsSection />}
+          {section === 'payments'      && <PaymentsSection />}
+          {section === 'tests'         && <TestsSection />}
+          {section === 'parents'       && <ParentsSection />}
+          {section === 'teachers'      && <TeachersSection />}
           {section === 'announcements' && <AnnouncementsSection />}
+          {section === 'holidays'      && <HolidaysSection />}
         </main>
       </div>
 
