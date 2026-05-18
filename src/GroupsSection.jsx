@@ -160,7 +160,7 @@ export default function GroupsSection() {
   const fetchAll = async () => {
     setLoading(true)
     const [{ data: teachers }, { data: groups }, { data: students }] = await Promise.all([
-      supabase.from('teachers').select('username, full_name').order('full_name'),
+      supabase.from('teachers').select('username, full_name').neq('username', 'test').order('full_name'),
       supabase.from('groups').select('*'),
       supabase.from('students').select('teacher_username, day, class_time'),
     ])

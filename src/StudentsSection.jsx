@@ -9,297 +9,362 @@ const TIME_SLOTS = {
   '14:30': '14:30 – 16:00', '16:00': '16:00 – 17:30',
   '17:30': '17:30 – 19:00', '19:00': '19:00 – 20:30',
 }
+const dayLabel = d => d === 'odd' ? 'Mon / Wed / Fri' : 'Tue / Thu / Sat'
+const inp = { width:'100%', padding:'11px 14px', borderRadius:'10px', border:'1.5px solid #e4e8e7', fontSize:'14px', outline:'none', color:D, fontFamily:"'DM Sans',sans-serif", boxSizing:'border-box', marginBottom:'14px' }
+const lbl = { fontSize:'11px', fontWeight:'700', color:'#64748b', textTransform:'uppercase', letterSpacing:'0.05em', display:'block', marginBottom:'6px' }
 
-const dayLabel = d => d === 'odd' ? 'Mon/Wed/Fri' : 'Tue/Thu/Sat'
+// ── BACK BUTTON ───────────────────────────────────────────────────────────────
+function Back({ label, onClick }) {
+  return (
+    <button onClick={onClick} style={{ display:'flex', alignItems:'center', gap:'6px', background:'none', border:'none', cursor:'pointer', color:'#64748b', fontSize:'13px', fontWeight:'600', marginBottom:'20px', padding:0, fontFamily:"'DM Sans',sans-serif" }}>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+      {label}
+    </button>
+  )
+}
 
 // ── TRANSFER MODAL ────────────────────────────────────────────────────────────
-function TransferModal({ student, onClose, onTransferred }) {
-  const [groups,       setGroups]       = useState([])
-  const [teachers,     setTeachers]     = useState({})
-  const [lessonMap,    setLessonMap]    = useState({})
-  const [selectedKey,  setSelectedKey]  = useState(null)
-  const [transferring, setTransferring] = useState(false)
-  const [loading,      setLoading]      = useState(true)
+function TransferModal({ student, currentGroup, onClose, onDone }) {
+  const [groups,    setGroups]    = useState([])
+  const [teachers,  setTeachers]  = useState({})
+  const [lessonMap, setLessonMap] = useState({})
+  const [selected,  setSelected]  = useState(null)
+  const [saving,    setSaving]    = useState(false)
+  const [loading,   setLoading]   = useState(true)
 
-  useEffect(() => { fetchGroups() }, [])
-
-  const fetchGroups = async () => {
-    const [{ data: groups }, { data: teachers }, { data: latestLessons }] = await Promise.all([
-      supabase.from('groups').select('*').order('class_time'),
-      supabase.from('teachers').select('username, full_name'),
-      // Get the latest lesson order per group
-      supabase.from('lessons').select('teacher_username, day, class_time, lesson_order')
-        .order('lesson_order', { ascending: false }),
-    ])
-
-    // Build teacher name map
-    const teacherMap = {}
-    for (const t of teachers || []) teacherMap[t.username] = t.full_name
-    setTeachers(teacherMap)
-
-    // Build latest lesson per group
-    const lmap = {}
-    for (const l of latestLessons || []) {
-      const key = `${l.teacher_username}_${l.day}_${l.class_time}`
-      if (!lmap[key]) lmap[key] = l.lesson_order // first = highest (ordered desc)
+  useEffect(() => {
+    const load = async () => {
+      const [{ data: g }, { data: t }, { data: l }] = await Promise.all([
+        supabase.from('groups').select('*').order('class_time'),
+        supabase.from('teachers').select('username, full_name').neq('username', 'test'),
+        supabase.from('lessons').select('teacher_username, day, class_time, lesson_order').order('lesson_order', { ascending: false }),
+      ])
+      const tm = {}; for (const x of t||[]) tm[x.username] = x.full_name
+      const lm = {}; for (const x of l||[]) { const k=`${x.teacher_username}_${x.day}_${x.class_time}`; if(!lm[k]) lm[k]=x.lesson_order }
+      setTeachers(tm); setLessonMap(lm)
+      setGroups((g||[]).filter(x => !(x.teacher_username===currentGroup.teacher_username && x.day===currentGroup.day && x.class_time===currentGroup.class_time)))
+      setLoading(false)
     }
-    setLessonMap(lmap)
+    load()
+  }, [])
 
-    // Exclude current group
-    const filtered = (groups || []).filter(g =>
-      !(g.teacher_username === student.teacher_username &&
-        g.day === student.day &&
-        g.class_time === student.class_time)
-    )
-    setGroups(filtered)
-    setLoading(false)
-  }
+  const getKey = g => `${g.teacher_username}|${g.day}|${g.class_time}`
+  const getLM  = g => lessonMap[`${g.teacher_username}_${g.day}_${g.class_time}`] || 0
 
   const confirm = async () => {
-    if (!selectedKey) return
-    const [teacher_username, day, class_time] = selectedKey.split('|')
-    setTransferring(true)
-
-    // Get new group's level from groups
-    const newGroup = groups.find(g =>
-      g.teacher_username === teacher_username && g.day === day && g.class_time === class_time
-    )
-    const currentLesson = lessonMap[`${teacher_username}_${day}_${class_time}`] || 1
-
-    // Update student
-    const { error } = await supabase.from('students')
-      .update({ teacher_username, day, class_time })
-      .eq('username', student.username)
-
-    if (error) { alert(error.message); setTransferring(false); return }
-
-    setTransferring(false)
-    onTransferred()
+    if (!selected) return
+    setSaving(true)
+    const [tu, day, ct] = selected.split('|')
+    await supabase.from('students').update({ teacher_username:tu, day, class_time:ct }).eq('username', student.username)
+    setSaving(false); onDone()
   }
 
-  const selectedGroup = selectedKey
-    ? groups.find(g => `${g.teacher_username}|${g.day}|${g.class_time}` === selectedKey)
-    : null
-
-  const currentLesson = selectedKey ? (lessonMap[selectedKey.replace(/\|/g,'_').replace('|','_')] || 1) : null
-
-  // Fix: compute key consistently
-  const getKey = g => `${g.teacher_username}|${g.day}|${g.class_time}`
-  const getLessonForGroup = g => lessonMap[`${g.teacher_username}_${g.day}_${g.class_time}`] || 0
-
-  // Same level first, then others
-  const sorted = [...groups].sort((a, b) => {
-    const aMatch = a.level === student.level ? 0 : 1
-    const bMatch = b.level === student.level ? 0 : 1
-    return aMatch - bMatch
-  })
+  const sorted = [...groups].sort((a,b) => (a.level===currentGroup.level?0:1)-(b.level===currentGroup.level?0:1))
 
   return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:200, padding:'24px', fontFamily:"'DM Sans',sans-serif" }}
-      onClick={e => e.target===e.currentTarget && onClose()}>
-      <div style={{ background:'white', borderRadius:'20px', width:'100%', maxWidth:'500px', maxHeight:'85vh', display:'flex', flexDirection:'column', boxShadow:'0 20px 60px rgba(0,0,0,0.2)', overflow:'hidden' }}>
-
-        {/* Header */}
-        <div style={{ padding:'24px 24px 16px', borderBottom:'1px solid #f0f2f1', flexShrink:0 }}>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'12px' }}>
-            <span style={{ fontSize:'18px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>Transfer Student</span>
-            <button onClick={onClose} style={{ width:'32px', height:'32px', borderRadius:'8px', background:'#f0f2f1', border:'none', cursor:'pointer', fontSize:'16px' }}>✕</button>
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:300, padding:'24px', fontFamily:"'DM Sans',sans-serif" }}
+      onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div style={{ background:'white', borderRadius:'20px', width:'100%', maxWidth:'480px', maxHeight:'82vh', display:'flex', flexDirection:'column', overflow:'hidden', boxShadow:'0 20px 60px rgba(0,0,0,0.2)' }}>
+        <div style={{ padding:'20px 20px 14px', borderBottom:'1px solid #f0f2f1', flexShrink:0 }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'6px' }}>
+            <span style={{ fontSize:'17px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>Transfer {student.full_name}</span>
+            <button onClick={onClose} style={{ width:'30px', height:'30px', borderRadius:'8px', background:'#f0f2f1', border:'none', cursor:'pointer', fontSize:'15px' }}>✕</button>
           </div>
-          {/* Student info */}
-          <div style={{ background:'#f8fafb', borderRadius:'12px', padding:'12px 16px' }}>
-            <div style={{ fontSize:'15px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>{student.full_name}</div>
-            <div style={{ fontSize:'12px', color:'#94a3b8', marginTop:'3px' }}>
-              {student.level} · {teachers[student.teacher_username] || student.teacher_username} · {dayLabel(student.day)} · {TIME_SLOTS[student.class_time] || student.class_time}
-            </div>
-          </div>
+          <div style={{ fontSize:'12px', color:'#94a3b8' }}>Current: {currentGroup.level} · {dayLabel(currentGroup.day)} · {TIME_SLOTS[currentGroup.class_time]}</div>
         </div>
-
-        {/* Group list */}
-        <div style={{ flex:1, overflowY:'auto', padding:'16px 24px' }}>
-          <div style={{ fontSize:'12px', fontWeight:'700', color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'10px' }}>
-            Select new group
-          </div>
-
-          {loading ? (
-            <div style={{ textAlign:'center', padding:'40px', color:'#94a3b8' }}>Loading groups…</div>
-          ) : sorted.map(g => {
-            const key      = getKey(g)
-            const isSelected = selectedKey === key
-            const lesson   = getLessonForGroup(g)
-            const isMatch  = g.level === student.level
+        <div style={{ flex:1, overflowY:'auto', padding:'14px 20px' }}>
+          {loading ? <div style={{ textAlign:'center', padding:'40px', color:'#94a3b8' }}>Loading…</div> : sorted.map(g => {
+            const key=getKey(g), isSel=selected===key, isMatch=g.level===currentGroup.level
             return (
-              <div key={key} onClick={() => setSelectedKey(isSelected ? null : key)}
-                style={{ padding:'14px 16px', borderRadius:'12px', marginBottom:'8px', cursor:'pointer',
-                  border:`1.5px solid ${isSelected ? G : '#f0f2f1'}`,
-                  background: isSelected ? `${G}08` : 'white',
-                  transition:'all 0.15s',
-                }}>
-                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+              <div key={key} onClick={()=>setSelected(isSel?null:key)}
+                style={{ padding:'12px 14px', borderRadius:'12px', marginBottom:'8px', cursor:'pointer', border:`1.5px solid ${isSel?G:'#f0f2f1'}`, background:isSel?`${G}08`:'white', transition:'all 0.15s' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                   <div>
-                    <div style={{ display:'flex', alignItems:'center', gap:'6px', marginBottom:'3px' }}>
-                      <span style={{ fontSize:'14px', fontWeight:'700', color: isSelected ? G : D, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>
-                        {g.level}
-                      </span>
-                      {isMatch && (
-                        <span style={{ fontSize:'10px', fontWeight:'700', padding:'1px 6px', borderRadius:'6px', background:`${G}15`, color:G }}>Same level</span>
-                      )}
+                    <div style={{ display:'flex', gap:'6px', alignItems:'center', marginBottom:'3px' }}>
+                      <span style={{ fontSize:'14px', fontWeight:'700', color:isSel?G:D, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>{g.level}</span>
+                      {isMatch && <span style={{ fontSize:'10px', fontWeight:'700', padding:'1px 6px', borderRadius:'6px', background:`${G}15`, color:G }}>Same level</span>}
                     </div>
-                    <div style={{ fontSize:'12px', color:'#64748b' }}>
-                      {teachers[g.teacher_username] || g.teacher_username} · {dayLabel(g.day)} · {TIME_SLOTS[g.class_time] || g.class_time}
-                    </div>
+                    <div style={{ fontSize:'12px', color:'#94a3b8' }}>{teachers[g.teacher_username]} · {dayLabel(g.day)} · {TIME_SLOTS[g.class_time]||g.class_time}</div>
                   </div>
-                  <div style={{ textAlign:'right', flexShrink:0 }}>
-                    <div style={{ fontSize:'12px', color:'#94a3b8' }}>Current lesson</div>
-                    <div style={{ fontSize:'14px', fontWeight:'800', color: isSelected ? G : D, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>
-                      {lesson > 0 ? `#${lesson}` : '—'}
-                    </div>
-                  </div>
+                  {getLM(g) > 0 && <div style={{ fontSize:'12px', fontWeight:'700', color:'#94a3b8' }}>Lesson #{getLM(g)}</div>}
                 </div>
               </div>
             )
           })}
         </div>
-
-        {/* Footer */}
-        <div style={{ padding:'16px 24px 24px', borderTop:'1px solid #f0f2f1', flexShrink:0 }}>
-          {selectedGroup && (
-            <div style={{ background:`${G}08`, borderRadius:'10px', padding:'10px 14px', marginBottom:'12px', fontSize:'13px', color:G, fontWeight:'600' }}>
-              ✓ Moving to {selectedGroup.level} · {dayLabel(selectedGroup.day)} · {TIME_SLOTS[selectedGroup.class_time]}
-              {getLessonForGroup(selectedGroup) > 0 && ` · Starting at lesson #${getLessonForGroup(selectedGroup)}`}
-            </div>
-          )}
-          <div style={{ display:'flex', gap:'10px' }}>
-            <button onClick={onClose} style={{ flex:1, padding:'13px', borderRadius:'12px', border:'1.5px solid #e4e8e7', background:'white', color:'#64748b', fontSize:'14px', fontWeight:'600', cursor:'pointer' }}>Cancel</button>
-            <button onClick={confirm} disabled={!selectedKey || transferring}
-              style={{ flex:2, padding:'13px', borderRadius:'12px', border:'none', background: selectedKey ? G : '#e4e8e7', color:'white', fontSize:'14px', fontWeight:'700', cursor: selectedKey ? 'pointer' : 'default', fontFamily:"'Plus Jakarta Sans',sans-serif", transition:'all 0.2s' }}>
-              {transferring ? 'Transferring…' : 'Confirm Transfer'}
-            </button>
-          </div>
+        <div style={{ padding:'14px 20px 20px', borderTop:'1px solid #f0f2f1', flexShrink:0, display:'flex', gap:'10px' }}>
+          <button onClick={onClose} style={{ flex:1, padding:'12px', borderRadius:'12px', border:'1.5px solid #e4e8e7', background:'white', color:'#64748b', fontSize:'14px', fontWeight:'600', cursor:'pointer' }}>Cancel</button>
+          <button onClick={confirm} disabled={!selected||saving}
+            style={{ flex:2, padding:'12px', borderRadius:'12px', border:'none', background:selected?G:'#e4e8e7', color:'white', fontSize:'14px', fontWeight:'700', cursor:selected?'pointer':'default', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>
+            {saving?'Transferring…':'Confirm Transfer'}
+          </button>
         </div>
       </div>
     </div>
   )
 }
 
-// ── STUDENT CARD ──────────────────────────────────────────────────────────────
-function StudentCard({ student, teacherName, onTransfer }) {
-  const initials = student.full_name.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase()
+// ── ADD STUDENT MODAL ─────────────────────────────────────────────────────────
+function AddStudentModal({ group, onClose, onSaved }) {
+  const [fullName, setFullName] = useState('')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [saving,   setSaving]   = useState(false)
+  const [error,    setError]    = useState('')
+
+  const save = async () => {
+    if (!fullName.trim() || !username.trim() || !password.trim()) { setError('All fields are required.'); return }
+    setSaving(true); setError('')
+    const { error: err } = await supabase.from('students').insert({
+      username: username.trim().toLowerCase(), password: password.trim(),
+      full_name: fullName.trim(), teacher_username: group.teacher_username,
+      day: group.day, class_time: group.class_time, coins: 0, gems: 0,
+    })
+    if (err) { setError(err.code==='23505'?'Username already taken.':err.message); setSaving(false); return }
+    onSaved()
+  }
+
   return (
-    <div style={{ background:'white', borderRadius:'14px', padding:'14px 16px', display:'flex', alignItems:'center', gap:'12px', boxShadow:'0 1px 6px rgba(0,0,0,0.06)', border:'1px solid #f0f2f1' }}>
-      <div style={{ width:'40px', height:'40px', borderRadius:'10px', background:`${G}15`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'14px', fontWeight:'800', color:G, flexShrink:0, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>
-        {initials}
-      </div>
-      <div style={{ flex:1, minWidth:0 }}>
-        <div style={{ fontSize:'14px', fontWeight:'700', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>{student.full_name}</div>
-        <div style={{ fontSize:'11px', color:'#94a3b8', marginTop:'2px' }}>
-          {teacherName} · {dayLabel(student.day)} · {TIME_SLOTS[student.class_time] || student.class_time}
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:200, padding:'24px', fontFamily:"'DM Sans',sans-serif" }}
+      onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div style={{ background:'white', borderRadius:'20px', padding:'26px', width:'100%', maxWidth:'400px', boxShadow:'0 20px 60px rgba(0,0,0,0.2)' }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'6px' }}>
+          <span style={{ fontSize:'17px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>Add Student</span>
+          <button onClick={onClose} style={{ width:'30px', height:'30px', borderRadius:'8px', background:'#f0f2f1', border:'none', cursor:'pointer', fontSize:'15px' }}>✕</button>
+        </div>
+        <div style={{ fontSize:'12px', color:'#94a3b8', marginBottom:'18px' }}>{group.level} · {dayLabel(group.day)} · {TIME_SLOTS[group.class_time]}</div>
+        <label style={lbl}>Full Name</label>
+        <input value={fullName} onChange={e=>setFullName(e.target.value)} placeholder="e.g. Robiya Inoyatova" style={inp} />
+        <label style={lbl}>Username</label>
+        <input value={username} onChange={e=>setUsername(e.target.value)} placeholder="e.g. robiya" autoCapitalize="none" style={inp} />
+        <label style={lbl}>Password</label>
+        <input value={password} onChange={e=>setPassword(e.target.value)} placeholder="Set a password" style={{ ...inp, marginBottom: error ? '8px' : '16px' }} />
+        {error && <div style={{ color:'#ef4444', fontSize:'13px', fontWeight:'600', marginBottom:'14px' }}>{error}</div>}
+        <div style={{ display:'flex', gap:'10px' }}>
+          <button onClick={onClose} style={{ flex:1, padding:'12px', borderRadius:'12px', border:'1.5px solid #e4e8e7', background:'white', color:'#64748b', fontSize:'14px', fontWeight:'600', cursor:'pointer' }}>Cancel</button>
+          <button onClick={save} disabled={saving} style={{ flex:2, padding:'12px', borderRadius:'12px', border:'none', background:G, color:'white', fontSize:'14px', fontWeight:'700', cursor:'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>
+            {saving?'Adding…':'Add Student'}
+          </button>
         </div>
       </div>
-      <div style={{ textAlign:'right', flexShrink:0, marginRight:'8px' }}>
-        <div style={{ fontSize:'11px', color:'#94a3b8' }}>{student.level || '—'}</div>
-        <div style={{ fontSize:'12px', color:'#f59e0b', fontWeight:'600', marginTop:'1px' }}>🪙 {student.coins || 0}</div>
+    </div>
+  )
+}
+
+// ── EDIT STUDENT MODAL ────────────────────────────────────────────────────────
+function EditStudentModal({ student, group, onClose, onSaved }) {
+  const [fullName,     setFullName]     = useState(student.full_name)
+  const [password,     setPassword]     = useState(student.password || '')
+  const [saving,       setSaving]       = useState(false)
+  const [error,        setError]        = useState('')
+  const [showTransfer, setShowTransfer] = useState(false)
+
+  const save = async () => {
+    setSaving(true); setError('')
+    const { error: err } = await supabase.from('students').update({ full_name: fullName.trim(), password: password.trim() }).eq('username', student.username)
+    if (err) { setError(err.message); setSaving(false); return }
+    onSaved()
+  }
+
+  if (showTransfer) return (
+    <TransferModal student={student} currentGroup={group}
+      onClose={() => setShowTransfer(false)}
+      onDone={() => { setShowTransfer(false); onSaved() }} />
+  )
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:200, padding:'24px', fontFamily:"'DM Sans',sans-serif" }}
+      onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div style={{ background:'white', borderRadius:'20px', padding:'26px', width:'100%', maxWidth:'400px', boxShadow:'0 20px 60px rgba(0,0,0,0.2)' }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'18px' }}>
+          <span style={{ fontSize:'17px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>Edit Student</span>
+          <button onClick={onClose} style={{ width:'30px', height:'30px', borderRadius:'8px', background:'#f0f2f1', border:'none', cursor:'pointer', fontSize:'15px' }}>✕</button>
+        </div>
+        <div style={{ background:'#f8fafb', borderRadius:'10px', padding:'10px 14px', marginBottom:'18px', fontSize:'13px', color:'#64748b' }}>
+          Username: <strong style={{ color:D }}>{student.username}</strong>
+        </div>
+        <label style={lbl}>Full Name</label>
+        <input value={fullName} onChange={e=>setFullName(e.target.value)} style={inp} />
+        <label style={lbl}>Password</label>
+        <input value={password} onChange={e=>setPassword(e.target.value)} style={inp} />
+        {error && <div style={{ color:'#ef4444', fontSize:'13px', fontWeight:'600', marginBottom:'12px' }}>{error}</div>}
+        <button onClick={() => setShowTransfer(true)}
+          style={{ width:'100%', padding:'11px', borderRadius:'10px', border:`1.5px solid ${G}`, background:'white', color:G, fontSize:'13px', fontWeight:'700', cursor:'pointer', marginBottom:'14px', display:'flex', alignItems:'center', justifyContent:'center', gap:'6px' }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={G} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+          Transfer to another group
+        </button>
+        <div style={{ display:'flex', gap:'10px' }}>
+          <button onClick={onClose} style={{ flex:1, padding:'12px', borderRadius:'12px', border:'1.5px solid #e4e8e7', background:'white', color:'#64748b', fontSize:'14px', fontWeight:'600', cursor:'pointer' }}>Cancel</button>
+          <button onClick={save} disabled={saving} style={{ flex:2, padding:'12px', borderRadius:'12px', border:'none', background:G, color:'white', fontSize:'14px', fontWeight:'700', cursor:'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>
+            {saving?'Saving…':'Save Changes'}
+          </button>
+        </div>
       </div>
-      <button onClick={() => onTransfer(student)}
-        style={{ padding:'8px 14px', borderRadius:'8px', border:`1.5px solid ${G}`, background:'white', color:G, fontSize:'12px', fontWeight:'700', cursor:'pointer', flexShrink:0, whiteSpace:'nowrap' }}>
-        Transfer
-      </button>
     </div>
   )
 }
 
 // ── MAIN ─────────────────────────────────────────────────────────────────────
 export default function StudentsSection() {
-  const [students,   setStudents]   = useState([])
-  const [teachers,   setTeachers]   = useState({})
-  const [groups,     setGroups]     = useState({}) // key → level
-  const [loading,    setLoading]    = useState(true)
-  const [search,     setSearch]     = useState('')
-  const [filterLevel,setFilterLevel]= useState('All')
-  const [transferring,setTransferring]= useState(null) // student object
+  const [view,            setView]           = useState('teachers')
+  const [teachers,        setTeachers]       = useState([])
+  const [selectedTeacher, setSelectedTeacher]= useState(null)
+  const [groups,          setGroups]         = useState([])
+  const [selectedGroup,   setSelectedGroup]  = useState(null)
+  const [students,        setStudents]       = useState([])
+  const [loading,         setLoading]        = useState(true)
+  const [addOpen,         setAddOpen]        = useState(false)
+  const [editStudent,     setEditStudent]    = useState(null)
 
-  const LEVELS = ['All','Beginner','Elementary','Pre-Intermediate','Intermediate','Upper-Intermediate','IELTS Foundation','IELTS Proficiency']
+  useEffect(() => { fetchTeachers() }, [])
 
-  useEffect(() => { fetchAll() }, [])
-
-  const fetchAll = async () => {
+  const fetchTeachers = async () => {
     setLoading(true)
-    const [{ data: students }, { data: teachers }, { data: groups }] = await Promise.all([
-      supabase.from('students').select('*').order('full_name'),
-      supabase.from('teachers').select('username, full_name'),
-      supabase.from('groups').select('teacher_username, day, class_time, level'),
-    ])
-
-    const teacherMap = {}
-    for (const t of teachers || []) teacherMap[t.username] = t.full_name
-
-    const groupMap = {}
-    for (const g of groups || []) groupMap[`${g.teacher_username}_${g.day}_${g.class_time}`] = g.level
-
-    // Enrich students with level from groups
-    const enriched = (students || []).map(s => ({
-      ...s,
-      level: groupMap[`${s.teacher_username}_${s.day}_${s.class_time}`] || s.level || '—'
-    }))
-
-    setStudents(enriched)
-    setTeachers(teacherMap)
-    setGroups(groupMap)
+    const { data } = await supabase.from('teachers').select('username, full_name').neq('username','test').order('full_name')
+    setTeachers(data || [])
     setLoading(false)
   }
 
-  const filtered = students.filter(s => {
-    const matchSearch = s.full_name.toLowerCase().includes(search.toLowerCase()) ||
-                        s.username.toLowerCase().includes(search.toLowerCase())
-    const matchLevel  = filterLevel === 'All' || s.level === filterLevel
-    return matchSearch && matchLevel
-  })
+  const fetchGroups = async (teacher) => {
+    setLoading(true)
+    const [{ data: g }, { data: s }] = await Promise.all([
+      supabase.from('groups').select('*').eq('teacher_username', teacher.username).order('day').order('class_time'),
+      supabase.from('students').select('day, class_time').eq('teacher_username', teacher.username),
+    ])
+    const counts = {}
+    for (const x of s||[]) { const k=`${x.day}_${x.class_time}`; counts[k]=(counts[k]||0)+1 }
+    setGroups((g||[]).map(x => ({ ...x, studentCount: counts[`${x.day}_${x.class_time}`]||0 })))
+    setLoading(false)
+  }
 
-  return (
+  const fetchStudents = async (group) => {
+    setLoading(true)
+    const { data } = await supabase.from('students').select('*')
+      .eq('teacher_username', group.teacher_username).eq('day', group.day).eq('class_time', group.class_time)
+      .order('full_name')
+    setStudents(data || [])
+    setLoading(false)
+  }
+
+  const goToTeacher = (t) => { setSelectedTeacher(t); fetchGroups(t); setView('groups') }
+  const goToGroup   = (g) => { setSelectedGroup(g); fetchStudents(g); setView('students') }
+  const goBack = () => {
+    if (view==='students') { setView('groups'); setSelectedGroup(null); fetchGroups(selectedTeacher) }
+    if (view==='groups')   { setView('teachers'); setSelectedTeacher(null); fetchTeachers() }
+  }
+
+  // ── TEACHERS ──
+  if (view === 'teachers') return (
     <div style={{ fontFamily:"'DM Sans',sans-serif" }}>
-      {/* Header */}
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'20px', flexWrap:'wrap', gap:'12px' }}>
-        <div>
-          <h2 style={{ fontSize:'20px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', color:D, marginBottom:'2px' }}>Students</h2>
-          <p style={{ fontSize:'13px', color:'#94a3b8' }}>{students.length} total · {filtered.length} shown</p>
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div style={{ display:'flex', gap:'10px', marginBottom:'16px', flexWrap:'wrap' }}>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or username…"
-          style={{ flex:1, minWidth:'200px', padding:'10px 14px', borderRadius:'10px', border:'1.5px solid #e4e8e7', fontSize:'14px', outline:'none', color:D, fontFamily:"'DM Sans',sans-serif" }} />
-        <select value={filterLevel} onChange={e => setFilterLevel(e.target.value)}
-          style={{ padding:'10px 14px', borderRadius:'10px', border:'1.5px solid #e4e8e7', fontSize:'14px', color:D, fontFamily:"'DM Sans',sans-serif", outline:'none', background:'white' }}>
-          {LEVELS.map(l => <option key={l}>{l}</option>)}
-        </select>
-      </div>
-
-      {/* Student list */}
-      {loading ? (
-        <div style={{ textAlign:'center', padding:'60px', color:'#94a3b8' }}>Loading…</div>
-      ) : filtered.length === 0 ? (
-        <div style={{ textAlign:'center', padding:'60px', background:'white', borderRadius:'16px' }}>
-          <div style={{ fontSize:'36px', marginBottom:'10px' }}>🔍</div>
-          <div style={{ fontSize:'15px', fontWeight:'700', color:'#111', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>No students found</div>
-        </div>
-      ) : (
-        <div style={{ display:'flex', flexDirection:'column', gap:'8px' }}>
-          {filtered.map(s => (
-            <StudentCard key={s.username} student={s}
-              teacherName={teachers[s.teacher_username] || s.teacher_username}
-              onTransfer={setTransferring} />
+      <h2 style={{ fontSize:'20px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', color:D, marginBottom:'4px' }}>Students</h2>
+      <p style={{ fontSize:'13px', color:'#94a3b8', marginBottom:'20px' }}>Select a teacher to manage their students.</p>
+      {loading ? <div style={{ textAlign:'center', padding:'60px', color:'#94a3b8' }}>Loading…</div> : (
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(210px, 1fr))', gap:'12px' }}>
+          {teachers.map(t => (
+            <button key={t.username} onClick={() => goToTeacher(t)}
+              style={{ background:'white', borderRadius:'16px', padding:'20px', border:'1.5px solid #f0f2f1', cursor:'pointer', textAlign:'left', boxShadow:'0 2px 8px rgba(0,0,0,0.05)', transition:'all 0.15s' }}
+              onMouseEnter={e=>{e.currentTarget.style.borderColor=G; e.currentTarget.style.boxShadow=`0 4px 16px ${G}20`}}
+              onMouseLeave={e=>{e.currentTarget.style.borderColor='#f0f2f1'; e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.05)'}}>
+              <div style={{ width:'44px', height:'44px', borderRadius:'12px', background:`${G}15`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'22px', marginBottom:'12px' }}>👨‍🏫</div>
+              <div style={{ fontSize:'15px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif", marginBottom:'2px' }}>{t.full_name}</div>
+              <div style={{ fontSize:'12px', color:'#94a3b8', marginBottom:'10px' }}>@{t.username}</div>
+              <div style={{ display:'flex', alignItems:'center', gap:'4px', fontSize:'12px', color:G, fontWeight:'600' }}>
+                View groups <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={G} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+              </div>
+            </button>
           ))}
         </div>
       )}
-
-      {/* Transfer modal */}
-      {transferring && (
-        <TransferModal
-          student={transferring}
-          onClose={() => setTransferring(null)}
-          onTransferred={() => { setTransferring(null); fetchAll() }}
-        />
-      )}
     </div>
   )
+
+  // ── GROUPS ──
+  if (view === 'groups') return (
+    <div style={{ fontFamily:"'DM Sans',sans-serif" }}>
+      <Back label="All Teachers" onClick={goBack} />
+      <h2 style={{ fontSize:'20px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', color:D, marginBottom:'3px' }}>{selectedTeacher?.full_name}</h2>
+      <p style={{ fontSize:'13px', color:'#94a3b8', marginBottom:'20px' }}>Select a group to view and manage students.</p>
+      {loading ? <div style={{ textAlign:'center', padding:'60px', color:'#94a3b8' }}>Loading…</div> :
+       groups.length === 0 ? (
+        <div style={{ textAlign:'center', padding:'60px', background:'white', borderRadius:'16px' }}>
+          <div style={{ fontSize:'36px', marginBottom:'10px' }}>📭</div>
+          <div style={{ fontSize:'15px', fontWeight:'700', color:'#111', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>No groups yet</div>
+          <div style={{ fontSize:'13px', color:'#94a3b8', marginTop:'4px' }}>Create groups in the Groups section first.</div>
+        </div>
+       ) : (
+        <div style={{ display:'flex', flexDirection:'column', gap:'10px', maxWidth:'540px' }}>
+          {groups.map(g => (
+            <button key={`${g.day}_${g.class_time}`} onClick={() => goToGroup(g)}
+              style={{ background:'white', borderRadius:'14px', padding:'16px 20px', border:'1.5px solid #f0f2f1', cursor:'pointer', display:'flex', alignItems:'center', gap:'14px', textAlign:'left', boxShadow:'0 2px 8px rgba(0,0,0,0.05)', transition:'all 0.15s' }}
+              onMouseEnter={e=>{e.currentTarget.style.borderColor=G}}
+              onMouseLeave={e=>{e.currentTarget.style.borderColor='#f0f2f1'}}>
+              <div style={{ flex:1 }}>
+                <div style={{ fontSize:'15px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif", marginBottom:'3px' }}>{g.level}</div>
+                <div style={{ fontSize:'12px', color:'#94a3b8' }}>{dayLabel(g.day)} · {TIME_SLOTS[g.class_time]||g.class_time}</div>
+              </div>
+              <div style={{ textAlign:'right', flexShrink:0 }}>
+                <div style={{ fontSize:'22px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>{g.studentCount}</div>
+                <div style={{ fontSize:'11px', color:'#94a3b8' }}>student{g.studentCount!==1?'s':''}</div>
+              </div>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+          ))}
+        </div>
+       )
+      }
+    </div>
+  )
+
+  // ── STUDENTS ──
+  if (view === 'students') return (
+    <div style={{ fontFamily:"'DM Sans',sans-serif" }}>
+      <Back label={selectedTeacher?.full_name} onClick={goBack} />
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'20px', flexWrap:'wrap', gap:'10px' }}>
+        <div>
+          <h2 style={{ fontSize:'20px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', color:D, marginBottom:'3px' }}>{selectedGroup?.level}</h2>
+          <p style={{ fontSize:'13px', color:'#94a3b8' }}>{dayLabel(selectedGroup?.day)} · {TIME_SLOTS[selectedGroup?.class_time]} · {students.length} student{students.length!==1?'s':''}</p>
+        </div>
+        <button onClick={() => setAddOpen(true)}
+          style={{ padding:'10px 18px', borderRadius:'10px', border:'none', background:G, color:'white', fontSize:'13px', fontWeight:'700', cursor:'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif", display:'flex', alignItems:'center', gap:'6px', boxShadow:`0 3px 12px ${G}40` }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Add Student
+        </button>
+      </div>
+
+      {loading ? <div style={{ textAlign:'center', padding:'60px', color:'#94a3b8' }}>Loading…</div> :
+       students.length === 0 ? (
+        <div style={{ textAlign:'center', padding:'60px', background:'white', borderRadius:'16px' }}>
+          <div style={{ fontSize:'36px', marginBottom:'10px' }}>👥</div>
+          <div style={{ fontSize:'15px', fontWeight:'700', color:'#111', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>No students yet</div>
+          <div style={{ fontSize:'13px', color:'#94a3b8', marginTop:'4px' }}>Click "Add Student" to get started.</div>
+        </div>
+       ) : (
+        <div style={{ display:'flex', flexDirection:'column', gap:'8px', maxWidth:'600px' }}>
+          {students.map(s => {
+            const initials = s.full_name.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase()
+            return (
+              <div key={s.username} style={{ background:'white', borderRadius:'14px', padding:'14px 16px', display:'flex', alignItems:'center', gap:'12px', boxShadow:'0 1px 6px rgba(0,0,0,0.06)', border:'1px solid #f0f2f1' }}>
+                <div style={{ width:'40px', height:'40px', borderRadius:'10px', background:`${G}15`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'14px', fontWeight:'800', color:G, flexShrink:0, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>{initials}</div>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:'14px', fontWeight:'700', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>{s.full_name}</div>
+                  <div style={{ fontSize:'11px', color:'#94a3b8', marginTop:'1px' }}>@{s.username}</div>
+                </div>
+                <div style={{ fontSize:'12px', color:'#f59e0b', fontWeight:'600', marginRight:'6px' }}>🪙 {s.coins||0}</div>
+                <button onClick={() => setEditStudent(s)}
+                  style={{ padding:'7px 14px', borderRadius:'8px', border:'1.5px solid #e4e8e7', background:'white', color:'#64748b', fontSize:'12px', fontWeight:'600', cursor:'pointer', flexShrink:0 }}>
+                  Edit
+                </button>
+              </div>
+            )
+          })}
+        </div>
+       )
+      }
+
+      {addOpen    && <AddStudentModal  group={selectedGroup} onClose={()=>setAddOpen(false)}    onSaved={()=>{ setAddOpen(false);   fetchStudents(selectedGroup) }} />}
+      {editStudent && <EditStudentModal student={editStudent} group={selectedGroup} onClose={()=>setEditStudent(null)} onSaved={()=>{ setEditStudent(null); fetchStudents(selectedGroup) }} />}
+    </div>
+  )
+
+  return null
 }
