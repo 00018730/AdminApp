@@ -10,7 +10,6 @@ import VocabAdmin from './VocabAdmin'
 import RequestsSection from './RequestsSection'
 import EssayImageAdmin from './EssayImageAdmin'
 import GroupsSection from './GroupsSection'
-import StudentsSection from './StudentsSection'
 
 const G = '#009472'
 const D = '#002b2a'
