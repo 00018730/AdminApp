@@ -18,6 +18,7 @@ function WordForm({ level, lessonOrder, wordCount, onSaved, onCancel, initial })
   const [opposRaw,    setOppRaw]      = useState((initial?.opposites  || []).join(', '))
   const [pictureFile, setPictureFile] = useState(null)
   const [picturePreview, setPreview]  = useState(initial?.picture_url || null)
+  const [pictureRemoved, setRemoved]  = useState(false)
   const [uploading,   setUploading]   = useState(false)
   const [saving,      setSaving]      = useState(false)
   const [error,       setError]       = useState('')
@@ -28,9 +29,11 @@ function WordForm({ level, lessonOrder, wordCount, onSaved, onCancel, initial })
     if (!file) return
     setPictureFile(file)
     setPreview(URL.createObjectURL(file))
+    setRemoved(false)
   }
 
   const uploadImage = async () => {
+    if (pictureRemoved && !pictureFile) return null
     if (!pictureFile) return initial?.picture_url || null
     const ext  = pictureFile.name.split('.').pop()
     const path = `${level}/${lessonOrder}/${word.toLowerCase().replace(/\s+/g,'_')}_${Date.now()}.${ext}`
@@ -109,7 +112,7 @@ function WordForm({ level, lessonOrder, wordCount, onSaved, onCancel, initial })
           {picturePreview ? '🔄 Change image' : '📁 Upload image'}
         </button>
         {picturePreview && (
-          <button onClick={() => { setPictureFile(null); setPreview(null) }} style={{ padding:'11px 14px', borderRadius:'10px', border:'1.5px solid #fca5a5', background:'#fef2f2', color:'#ef4444', fontSize:'13px', fontWeight:'600', cursor:'pointer' }}>Remove</button>
+          <button onClick={() => { setPictureFile(null); setPreview(null); setRemoved(true) }} style={{ padding:'11px 14px', borderRadius:'10px', border:'1.5px solid #fca5a5', background:'#fef2f2', color:'#ef4444', fontSize:'13px', fontWeight:'600', cursor:'pointer' }}>Remove</button>
         )}
         <input ref={fileRef} type="file" accept="image/png,image/jpeg" style={{ display:'none' }} onChange={handleFile} />
       </div>
