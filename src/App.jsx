@@ -215,10 +215,7 @@ export default function App() {
 
   if (!role) return <Login onLogin={login} />
   if (role === 'education') return <EducationApp onLogout={logout} />
-
-  // ── Admin role ──
-  const [section, setSection]       = [useState('students')[0], useState('students')[1]]
-  return <AdminApp role={role} onLogout={logout} />
+  return <AdminApp onLogout={logout} />
 }
 
 function AdminApp({ onLogout }) {
