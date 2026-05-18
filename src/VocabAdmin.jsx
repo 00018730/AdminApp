@@ -36,7 +36,7 @@ function WordForm({ level, lessonOrder, wordCount, onSaved, onCancel, initial })
     const path = `${level}/${lessonOrder}/${word.toLowerCase().replace(/\s+/g,'_')}_${Date.now()}.${ext}`
     const { data: up, error: upErr } = await supabase.storage
       .from('vocabulary-images')
-      .upload(path, pictureFile, { contentType: pictureFile.type, upsert: false })
+      .upload(path, pictureFile, { contentType: pictureFile.type, upsert: true })
     if (upErr) { setError('Image upload failed: ' + upErr.message); return null }
     const { data: { publicUrl } } = supabase.storage.from('vocabulary-images').getPublicUrl(up.path)
     return publicUrl
