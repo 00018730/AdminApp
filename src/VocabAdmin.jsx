@@ -130,14 +130,30 @@ function WordForm({ level, lessonOrder, wordCount, onSaved, onCancel, initial })
 
 // ── VOCAB ADMIN MAIN ──────────────────────────────────────────────────────────
 function VocabAdminMain() {
-  const [level,       setLevel]      = useState('Pre-Intermediate')
+  const [level,       setLevelState] = useState('Pre-Intermediate')
   const [lessonOrder, setLesson]     = useState(1)
+  const [lessons,     setLessons]    = useState([])
   const [words,       setWords]      = useState([])
   const [loading,     setLoading]    = useState(false)
   const [showForm,    setShowForm]   = useState(false)
   const [editWord,    setEditWord]   = useState(null)
+  const topRef = useRef(null)
 
+  useEffect(() => { fetchLessons(level) }, [level])
   useEffect(() => { fetchWords() }, [level, lessonOrder])
+
+  const fetchLessons = async (lvl) => {
+    const { data } = await supabase.from('level_lessons')
+      .select('lesson_order, lesson_name')
+      .eq('level', lvl)
+      .not('lesson_name', 'in', '("Mid-Term Exam","Final Exam")')
+      .order('lesson_order')
+    const list = data || []
+    setLessons(list)
+    if (list.length > 0) setLesson(list[0].lesson_order)
+  }
+
+  const setLevel = (lvl) => { setLevelState(lvl) }
 
   const fetchWords = async () => {
     setLoading(true)
@@ -154,10 +170,18 @@ function VocabAdminMain() {
     fetchWords()
   }
 
+  const handleEdit = (w) => {
+    setEditWord(w)
+    setShowForm(false)
+    topRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
   const handleSaved = () => { setShowForm(false); setEditWord(null); fetchWords() }
 
+  const currentLesson = lessons.find(l => l.lesson_order === lessonOrder)
+
   return (
-    <div style={{ maxWidth:'600px', margin:'0 auto', padding:'24px 20px 60px', fontFamily:"'DM Sans',sans-serif" }}>
+    <div ref={topRef} style={{ maxWidth:'600px', margin:'0 auto', padding:'24px 20px 60px', fontFamily:"'DM Sans',sans-serif" }}>
       {/* Header */}
       <div style={{ marginBottom:'24px' }}>
         <div style={{ fontSize:'24px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', color:D }}>Vocabulary Recap</div>
@@ -166,22 +190,24 @@ function VocabAdminMain() {
 
       {/* Level + Lesson selectors */}
       <div style={{ background:'white', borderRadius:'16px', padding:'20px', marginBottom:'20px', boxShadow:'0 2px 8px rgba(0,0,0,0.06)' }}>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 120px', gap:'12px' }}>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
           <div>
             <label style={{ fontSize:'11px', fontWeight:'700', color:'#64748b', textTransform:'uppercase', letterSpacing:'0.05em', display:'block', marginBottom:'6px' }}>Level</label>
-            <select value={level} onChange={e => setLevel(e.target.value)} style={{ width:'100%', padding:'11px 14px', borderRadius:'10px', border:'1.5px solid #e4e8e7', fontSize:'14px', color:D, fontFamily:"'DM Sans',sans-serif", outline:'none', background:'white' }}>
+            <select value={level} onChange={e => setLevel(e.target.value)}
+              style={{ width:'100%', padding:'11px 14px', borderRadius:'10px', border:'1.5px solid #e4e8e7', fontSize:'14px', color:D, fontFamily:"'DM Sans',sans-serif", outline:'none', background:'white' }}>
               {LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
             </select>
           </div>
           <div>
             <label style={{ fontSize:'11px', fontWeight:'700', color:'#64748b', textTransform:'uppercase', letterSpacing:'0.05em', display:'block', marginBottom:'6px' }}>Lesson</label>
-            <input type="number" value={lessonOrder} min={1} max={52}
-              onChange={e => setLesson(parseInt(e.target.value) || 1)}
-              style={{ width:'100%', padding:'11px 14px', borderRadius:'10px', border:'1.5px solid #e4e8e7', fontSize:'14px', color:D, fontFamily:"'DM Sans',sans-serif", outline:'none', boxSizing:'border-box' }} />
+            <select value={lessonOrder} onChange={e => setLesson(Number(e.target.value))}
+              style={{ width:'100%', padding:'11px 14px', borderRadius:'10px', border:'1.5px solid #e4e8e7', fontSize:'14px', color:D, fontFamily:"'DM Sans',sans-serif", outline:'none', background:'white' }}>
+              {lessons.map(l => <option key={l.lesson_order} value={l.lesson_order}>{l.lesson_name}</option>)}
+            </select>
           </div>
         </div>
         <div style={{ marginTop:'12px', fontSize:'13px', color:'#94a3b8' }}>
-          {level} · Lesson {lessonOrder} · <strong style={{ color:G }}>{words.length} word{words.length !== 1 ? 's' : ''}</strong>
+          {level} · {currentLesson?.lesson_name || `Lesson ${lessonOrder}`} · <strong style={{ color:G }}>{words.length} word{words.length !== 1 ? 's' : ''}</strong>
         </div>
       </div>
 
@@ -240,7 +266,7 @@ function VocabAdminMain() {
                   )}
                 </div>
                 <div style={{ display:'flex', gap:'6px', flexShrink:0 }}>
-                  <button onClick={() => { setEditWord(w); setShowForm(false) }} style={{ padding:'7px 12px', borderRadius:'8px', border:'1.5px solid #e4e8e7', background:'white', color:'#64748b', fontSize:'12px', fontWeight:'600', cursor:'pointer' }}>Edit</button>
+                  <button onClick={() => handleEdit(w)} style={{ padding:'7px 12px', borderRadius:'8px', border:'1.5px solid #e4e8e7', background:'white', color:'#64748b', fontSize:'12px', fontWeight:'600', cursor:'pointer' }}>Edit</button>
                   <button onClick={() => deleteWord(w.id)} style={{ padding:'7px 12px', borderRadius:'8px', border:'1.5px solid #fca5a5', background:'#fef2f2', color:'#ef4444', fontSize:'12px', fontWeight:'600', cursor:'pointer' }}>Delete</button>
                 </div>
               </div>
