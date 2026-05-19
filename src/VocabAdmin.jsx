@@ -16,62 +16,75 @@ function WordForm({ level, lessonOrder, wordCount, onSaved, onCancel, initial })
   const [sentence,    setSentence]    = useState(initial?.sentence    || '')
   const [synonymsRaw, setSynonymsRaw] = useState((initial?.synonyms  || []).join(', '))
   const [opposRaw,    setOppRaw]      = useState((initial?.opposites  || []).join(', '))
-  const [pictureFile, setPictureFile] = useState(null)
-  const [picturePreview, setPreview]  = useState(initial?.picture_url || null)
-  const [pictureRemoved, setRemoved]  = useState(false)
-  const [uploading,   setUploading]   = useState(false)
   const [saving,      setSaving]      = useState(false)
+  const [uploading,   setUploading]   = useState(false)
   const [error,       setError]       = useState('')
-  const fileRef = useRef(null)
 
-  const handleFile = (e) => {
-    const file = e.target.files?.[0]
+  // 4 quiz image slots: [correct, wrong1, wrong2, wrong3]
+  const EXISTING = [initial?.picture_url||null, initial?.picture_url_2||null, initial?.picture_url_3||null, initial?.picture_url_4||null]
+  const [quizFiles,    setQuizFiles]    = useState([null, null, null, null])
+  const [quizPreviews, setQuizPreviews] = useState(EXISTING)
+  const [quizRemoved,  setQuizRemoved]  = useState([false, false, false, false])
+  const fileRefs = [useRef(null), useRef(null), useRef(null), useRef(null)]
+
+  const handleFile = (i, file) => {
     if (!file) return
-    setPictureFile(file)
-    setPreview(URL.createObjectURL(file))
-    setRemoved(false)
+    const files = [...quizFiles];    files[i] = file;    setQuizFiles(files)
+    const prev  = [...quizPreviews]; prev[i]  = URL.createObjectURL(file); setQuizPreviews(prev)
+    const rem   = [...quizRemoved];  rem[i]   = false;  setQuizRemoved(rem)
   }
 
-  const uploadImage = async () => {
-    if (pictureRemoved && !pictureFile) return null
-    if (!pictureFile) return initial?.picture_url || null
-    const ext  = pictureFile.name.split('.').pop()
-    const path = `${level}/${lessonOrder}/${word.toLowerCase().replace(/\s+/g,'_')}_${Date.now()}.${ext}`
-    const { data: up, error: upErr } = await supabase.storage
-      .from('vocabulary-images')
-      .upload(path, pictureFile, { contentType: pictureFile.type, upsert: true })
-    if (upErr) { setError('Image upload failed: ' + upErr.message); return null }
-    const { data: { publicUrl } } = supabase.storage.from('vocabulary-images').getPublicUrl(up.path)
-    return publicUrl
+  const removeSlot = (i) => {
+    const files = [...quizFiles];    files[i] = null;  setQuizFiles(files)
+    const prev  = [...quizPreviews]; prev[i]  = null;  setQuizPreviews(prev)
+    const rem   = [...quizRemoved];  rem[i]   = true;  setQuizRemoved(rem)
+  }
+
+  const uploadQuizImages = async () => {
+    const urls = []
+    const suffix = ['correct', 'wrong1', 'wrong2', 'wrong3']
+    for (let i = 0; i < 4; i++) {
+      if (quizRemoved[i] && !quizFiles[i]) { urls.push(null); continue }
+      if (!quizFiles[i]) { urls.push(EXISTING[i] || null); continue }
+      const ext  = quizFiles[i].name.split('.').pop()
+      const path = `${level}/${lessonOrder}/${word.toLowerCase().replace(/\s+/g,'_')}_${suffix[i]}.${ext}`
+      const { data: up, error: upErr } = await supabase.storage.from('vocabulary-images').upload(path, quizFiles[i], { contentType: quizFiles[i].type, upsert: true })
+      if (upErr) { setError('Image upload failed: ' + upErr.message); return null }
+      const { data: { publicUrl } } = supabase.storage.from('vocabulary-images').getPublicUrl(up.path)
+      urls.push(publicUrl)
+    }
+    return urls
   }
 
   const save = async () => {
     if (!word.trim() || !definition.trim() || !sentence.trim()) { setError('Word, definition and sentence are required.'); return }
     if (!sentence.includes('___')) { setError('Sentence must include ___ as a blank placeholder.'); return }
-    setError('')
-    setSaving(true)
-    setUploading(!!pictureFile)
+    const uploadedCount = quizPreviews.filter(Boolean).length
+    if (uploadedCount > 0 && uploadedCount < 4) { setError('Please upload all 4 quiz images or none.'); return }
+    setError(''); setSaving(true)
+    setUploading(quizFiles.some(Boolean))
 
-    const pictureUrl = await uploadImage()
+    const quizUrls = await uploadQuizImages()
     setUploading(false)
+    if (!quizUrls) { setSaving(false); return }
 
     const row = {
       level, lesson_order: lessonOrder,
-      word: word.trim(),
-      picture_url: pictureUrl,
+      word:        word.trim(),
       definition:  definition.trim(),
       sentence:    sentence.trim(),
       synonyms:    synonymsRaw.split(',').map(s => s.trim()).filter(Boolean),
       opposites:   opposRaw.split(',').map(s => s.trim()).filter(Boolean),
       word_order:  initial?.word_order ?? wordCount,
+      picture_url:   quizUrls[0],
+      picture_url_2: quizUrls[1],
+      picture_url_3: quizUrls[2],
+      picture_url_4: quizUrls[3],
     }
 
     let err
-    if (initial?.id) {
-      ;({ error: err } = await supabase.from('vocabulary_words').update(row).eq('id', initial.id))
-    } else {
-      ;({ error: err } = await supabase.from('vocabulary_words').insert(row))
-    }
+    if (initial?.id) { ;({ error: err } = await supabase.from('vocabulary_words').update(row).eq('id', initial.id)) }
+    else             { ;({ error: err } = await supabase.from('vocabulary_words').insert(row)) }
 
     setSaving(false)
     if (err) { setError(err.message); return }
@@ -80,6 +93,13 @@ function WordForm({ level, lessonOrder, wordCount, onSaved, onCancel, initial })
 
   const labelStyle = { fontSize:'11px', fontWeight:'700', color:'#64748b', textTransform:'uppercase', letterSpacing:'0.05em', display:'block', marginBottom:'6px' }
   const inputStyle = { width:'100%', padding:'11px 14px', borderRadius:'10px', border:'1.5px solid #e4e8e7', fontSize:'14px', outline:'none', color:D, fontFamily:"'DM Sans',sans-serif", boxSizing:'border-box', marginBottom:'16px' }
+
+  const SLOT_LABELS = [
+    { label:'✓ Correct', color:G,         bg:'#d1fae5' },
+    { label:'✗ Wrong 1', color:'#ef4444', bg:'#fee2e2' },
+    { label:'✗ Wrong 2', color:'#ef4444', bg:'#fee2e2' },
+    { label:'✗ Wrong 3', color:'#ef4444', bg:'#fee2e2' },
+  ]
 
   return (
     <div style={{ background:'white', borderRadius:'20px', padding:'24px', border:'1.5px solid #e4e8e7', marginBottom:'16px' }}>
@@ -91,7 +111,7 @@ function WordForm({ level, lessonOrder, wordCount, onSaved, onCancel, initial })
       <input value={word} onChange={e => setWord(e.target.value)} placeholder="e.g. ambitious" style={inputStyle} />
 
       <label style={labelStyle}>Definition *</label>
-      <textarea value={definition} onChange={e => setDefinition(e.target.value)} placeholder="e.g. Having a strong desire to succeed or achieve something." rows={2}
+      <textarea value={definition} onChange={e => setDefinition(e.target.value)} placeholder="e.g. Having a strong desire to succeed." rows={2}
         style={{ ...inputStyle, resize:'vertical', lineHeight:1.5 }} />
 
       <label style={labelStyle}>Sentence with blank * <span style={{ fontWeight:'400', color:'#94a3b8' }}>(use ___ for the missing word)</span></label>
@@ -103,28 +123,58 @@ function WordForm({ level, lessonOrder, wordCount, onSaved, onCancel, initial })
       <label style={labelStyle}>Opposites <span style={{ fontWeight:'400', color:'#94a3b8' }}>(comma separated)</span></label>
       <input value={opposRaw} onChange={e => setOppRaw(e.target.value)} placeholder="e.g. lazy, unmotivated" style={inputStyle} />
 
-      <label style={labelStyle}>Picture <span style={{ fontWeight:'400', color:'#94a3b8' }}>(PNG or JPG, optional)</span></label>
-      <div style={{ display:'flex', gap:'12px', alignItems:'flex-start', marginBottom:'16px' }}>
-        {picturePreview && (
-          <img src={picturePreview} alt="preview" style={{ width:'80px', height:'80px', objectFit:'cover', borderRadius:'12px', border:'1.5px solid #e4e8e7', flexShrink:0 }} />
-        )}
-        <button onClick={() => fileRef.current?.click()} style={{ padding:'11px 18px', borderRadius:'10px', border:'1.5px dashed #c4cdd6', background:'#f8fafb', color:'#64748b', fontSize:'13px', fontWeight:'600', cursor:'pointer', fontFamily:"'DM Sans',sans-serif" }}>
-          {picturePreview ? '🔄 Change image' : '📁 Upload image'}
-        </button>
-        {picturePreview && (
-          <button onClick={() => { setPictureFile(null); setPreview(null); setRemoved(true) }} style={{ padding:'11px 14px', borderRadius:'10px', border:'1.5px solid #fca5a5', background:'#fef2f2', color:'#ef4444', fontSize:'13px', fontWeight:'600', cursor:'pointer' }}>Remove</button>
-        )}
-        <input ref={fileRef} type="file" accept="image/png,image/jpeg" style={{ display:'none' }} onChange={handleFile} />
+      {/* ── Quiz Images ── */}
+      <div style={{ marginBottom:'16px' }}>
+        <label style={labelStyle}>
+          Quiz Images <span style={{ fontWeight:'400', color:'#94a3b8', textTransform:'none', fontSize:'11px' }}>optional — upload all 4 or none</span>
+        </label>
+        <div style={{ background:'#f8fafb', borderRadius:'14px', padding:'14px', border:'1.5px dashed #e4e8e7' }}>
+          <div style={{ fontSize:'12px', color:'#94a3b8', marginBottom:'12px' }}>
+            Upload the correct image and 3 wrong options. Students will pick the one that matches the word.
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px' }}>
+            {SLOT_LABELS.map((slot, i) => (
+              <div key={i} style={{ position:'relative' }}>
+                {/* Badge */}
+                <div style={{ display:'inline-block', fontSize:'10px', fontWeight:'800', padding:'2px 8px', borderRadius:'6px', background:slot.bg, color:slot.color, marginBottom:'6px' }}>
+                  {slot.label}
+                </div>
+
+                {quizPreviews[i] ? (
+                  <div style={{ position:'relative', borderRadius:'12px', overflow:'hidden', border:`2px solid ${i===0?G:'#fca5a5'}`, aspectRatio:'1' }}>
+                    <img src={quizPreviews[i]} alt={slot.label} style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }} />
+                    <div style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0)', transition:'background 0.2s', display:'flex', flexDirection:'column', justifyContent:'flex-end', padding:'6px', gap:'4px' }}>
+                      <button onClick={() => fileRefs[i].current?.click()}
+                        style={{ padding:'4px 8px', borderRadius:'6px', border:'none', background:'rgba(0,0,0,0.6)', color:'white', fontSize:'10px', fontWeight:'700', cursor:'pointer', width:'100%' }}>
+                        Change
+                      </button>
+                      <button onClick={() => removeSlot(i)}
+                        style={{ padding:'4px 8px', borderRadius:'6px', border:'none', background:'rgba(239,68,68,0.8)', color:'white', fontSize:'10px', fontWeight:'700', cursor:'pointer', width:'100%' }}>
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button onClick={() => fileRefs[i].current?.click()}
+                    style={{ width:'100%', aspectRatio:'1', borderRadius:'12px', border:`2px dashed ${i===0?`${G}60`:'#e4e8e7'}`, background:'white', cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:'6px', color:'#94a3b8' }}>
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                    <span style={{ fontSize:'11px', fontWeight:'600' }}>Upload</span>
+                  </button>
+                )}
+                <input ref={fileRefs[i]} type="file" accept="image/*" style={{ display:'none' }}
+                  onChange={e => { if (e.target.files[0]) handleFile(i, e.target.files[0]); e.target.value='' }} />
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
 
       {error && <div style={{ padding:'10px 14px', background:'#fef2f2', borderRadius:'10px', color:'#ef4444', fontSize:'13px', fontWeight:'600', marginBottom:'14px' }}>{error}</div>}
 
       <div style={{ display:'flex', gap:'10px' }}>
-        <button onClick={onCancel} style={{ flex:1, padding:'13px', borderRadius:'12px', border:'1.5px solid #e4e8e7', background:'white', color:'#64748b', fontSize:'14px', fontWeight:'700', cursor:'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>
-          Cancel
-        </button>
-        <button onClick={save} disabled={saving} style={{ flex:2, padding:'13px', borderRadius:'12px', border:'none', background: saving ? '#c4cdd6' : G, color:'white', fontSize:'14px', fontWeight:'700', cursor: saving ? 'default' : 'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>
-          {uploading ? 'Uploading image...' : saving ? 'Saving...' : initial ? '✓ Save Changes' : '+ Add Word'}
+        <button onClick={onCancel} style={{ flex:1, padding:'13px', borderRadius:'12px', border:'1.5px solid #e4e8e7', background:'white', color:'#64748b', fontSize:'14px', fontWeight:'700', cursor:'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>Cancel</button>
+        <button onClick={save} disabled={saving} style={{ flex:2, padding:'13px', borderRadius:'12px', border:'none', background:saving?'#c4cdd6':G, color:'white', fontSize:'14px', fontWeight:'700', cursor:saving?'default':'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>
+          {uploading?'Uploading images…':saving?'Saving…':initial?'✓ Save Changes':'+ Add Word'}
         </button>
       </div>
     </div>

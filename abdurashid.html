@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Hello Abdurashid</title>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@900&family=Lora:ital,wght@0,500;1,400&family=Quicksand:wght@600&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: #1a3a6b;
+      background-image:
+        radial-gradient(ellipse at 20% 30%, rgba(30, 80, 160, 0.7) 0%, transparent 60%),
+        radial-gradient(ellipse at 80% 70%, rgba(10, 50, 120, 0.8) 0%, transparent 60%),
+        repeating-linear-gradient(
+          45deg,
+          rgba(255,255,255,0.015) 0px,
+          rgba(255,255,255,0.015) 1px,
+          transparent 1px,
+          transparent 40px
+        );
+      font-family: 'Lora', serif;
+      text-align: center;
+      padding: 2rem;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* Floating orbs */
+    body::before, body::after {
+      content: '';
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(80px);
+      opacity: 0.25;
+      pointer-events: none;
+    }
+    body::before {
+      width: 500px; height: 500px;
+      background: radial-gradient(circle, #f97316, transparent);
+      top: -150px; left: -100px;
+      animation: drift1 8s ease-in-out infinite alternate;
+    }
+    body::after {
+      width: 400px; height: 400px;
+      background: radial-gradient(circle, #22c55e, transparent);
+      bottom: -100px; right: -80px;
+      animation: drift2 10s ease-in-out infinite alternate;
+    }
+
+    @keyframes drift1 { to { transform: translate(60px, 80px); } }
+    @keyframes drift2 { to { transform: translate(-50px, -60px); } }
+
+    .card {
+      position: relative;
+      z-index: 1;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 2rem;
+      padding: 4rem 5rem;
+      backdrop-filter: blur(10px);
+      box-shadow:
+        0 0 0 1px rgba(255,255,255,0.05),
+        0 30px 80px rgba(0,0,0,0.4),
+        inset 0 1px 0 rgba(255,255,255,0.1);
+      max-width: 820px;
+      width: 100%;
+      animation: fadeUp 1s ease both;
+    }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(40px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .hello {
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(3rem, 9vw, 6.5rem);
+      font-weight: 900;
+      color: #fb923c;
+      line-height: 1.05;
+      letter-spacing: -0.02em;
+      text-shadow:
+        0 0 40px rgba(251, 146, 60, 0.5),
+        0 4px 20px rgba(0,0,0,0.4);
+      animation: fadeUp 1s ease 0.15s both;
+    }
+
+    .good-day {
+      font-family: 'Quicksand', sans-serif;
+      font-size: clamp(1.3rem, 3.5vw, 2.2rem);
+      font-weight: 600;
+      color: #4ade80;
+      margin-top: 1.2rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      text-shadow: 0 0 20px rgba(74, 222, 128, 0.4);
+      animation: fadeUp 1s ease 0.3s both;
+    }
+
+    .divider {
+      width: 60px;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+      margin: 1.8rem auto;
+      animation: fadeUp 1s ease 0.45s both;
+    }
+
+    .question {
+      font-family: 'Lora', serif;
+      font-size: clamp(1rem, 2.5vw, 1.5rem);
+      font-style: italic;
+      font-weight: 400;
+      color: #fde047;
+      line-height: 1.9;
+      text-shadow: 0 0 16px rgba(253, 224, 71, 0.35);
+      animation: fadeUp 1s ease 0.6s both;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1 class="hello">Hello Abdurashid</h1>
+    <p class="good-day">Fuck you from the bottom of my heart</p>
+    <div class="divider"></div>
+    <p class="question">
+      Whenever you take a shit<br>
+      Remember Abdurashid
+    </p>
+  </div>
+</body>
+</html>
