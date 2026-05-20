@@ -20,40 +20,17 @@ function parseWords(raw) {
 
 // ── AI: GENERATE DEFINITIONS + SENTENCES ─────────────────────────────────────
 async function generateBatch(words) {
-  const key = import.meta.env.VITE_ANTHROPIC_KEY
-  if (!key) throw new Error('Add VITE_ANTHROPIC_KEY to your Vercel environment variables.')
-
-  const prompt = `You are helping an English language school create vocabulary exercises.
-For each word below, provide:
-1. A short, clear definition (one sentence, suitable for B1–B2 learners)
-2. A natural example sentence where the word is replaced by ___
-
-Words: ${words.join(', ')}
-
-Return ONLY a valid JSON array, no extra text:
-[{"word":"...","definition":"...","sentence":"The ___ is..."}]`
-
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const res = await fetch('/api/generate-vocab', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': key,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1500,
-      messages: [{ role:'user', content: prompt }],
-    }),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ words }),
   })
-
-  const data = await res.json()
-  const text = data.content?.[0]?.text?.trim() || '[]'
-  // Strip any markdown fences just in case
-  const clean = text.replace(/```json|```/g, '').trim()
-  return JSON.parse(clean)
+  if (!res.ok) {
+    const err = await res.json().catch(()=>({}))
+    throw new Error(err.error || 'API request failed')
+  }
+  return res.json()
 }
-
 // ── IMAGE SLOT ─────────────────────────────────────────────────────────────────
 const SLOT_META = [
   { label:'✓ Correct', color:G,         bg:'#d1fae5' },
@@ -399,39 +376,38 @@ export default function VocabAdmin() {
   const [levels,        setLevels]        = useState([])
   const [selectedLevel, setSelectedLevel] = useState('')
   const [lessons,       setLessons]       = useState([])
+  const [wordCounts,    setWordCounts]    = useState({})   // lesson_order → count
   const [selectedLesson,setSelectedLesson]= useState(null)
   const [words,         setWords]         = useState([])
   const [loading,       setLoading]       = useState(false)
   const [showImport,    setShowImport]    = useState(false)
   const [editWord,      setEditWord]      = useState(null)
-  const topRef = useRef(null)
 
   useEffect(() => {
-    const loadLevels = async () => {
-      const { data } = await supabase.from('level_lessons').select('level').order('level')
+    supabase.from('level_lessons').select('level').order('level').then(({ data }) => {
       const unique = [...new Set((data||[]).map(r=>r.level))]
       setLevels(unique)
       if (unique[0]) setSelectedLevel(unique[0])
-    }
-    loadLevels()
+    })
   }, [])
 
   useEffect(() => {
     if (!selectedLevel) return
-    setSelectedLesson(null); setWords([])
-    const load = async () => {
-      const { data } = await supabase.from('level_lessons').select('*').eq('level',selectedLevel)
+    setSelectedLesson(null); setWords([]); setWordCounts({})
+    Promise.all([
+      supabase.from('level_lessons').select('*').eq('level',selectedLevel)
         .not('lesson_name','ilike','%Mid-Term%').not('lesson_name','ilike','%Final%')
-        .order('lesson_order')
-      setLessons(data||[])
-    }
-    load()
+        .order('lesson_order'),
+      supabase.from('vocabulary_words').select('lesson_order').eq('level',selectedLevel)
+    ]).then(([{ data: ls }, { data: ws }]) => {
+      setLessons(ls||[])
+      const counts = {}
+      for (const w of (ws||[])) counts[w.lesson_order] = (counts[w.lesson_order]||0) + 1
+      setWordCounts(counts)
+    })
   }, [selectedLevel])
 
-  useEffect(() => {
-    if (!selectedLesson) return
-    fetchWords()
-  }, [selectedLesson])
+  useEffect(() => { if (selectedLesson) fetchWords() }, [selectedLesson])
 
   const fetchWords = async () => {
     setLoading(true)
@@ -439,6 +415,8 @@ export default function VocabAdmin() {
       .eq('level', selectedLevel).eq('lesson_order', selectedLesson.lesson_order)
       .order('word_order')
     setWords(data||[])
+    // refresh count badge too
+    setWordCounts(prev => ({ ...prev, [selectedLesson.lesson_order]: (data||[]).length }))
     setLoading(false)
   }
 
@@ -448,68 +426,149 @@ export default function VocabAdmin() {
     fetchWords()
   }
 
-  return (
-    <div style={{ fontFamily:"'DM Sans',sans-serif", maxWidth:'680px' }} ref={topRef}>
+  const totalWords = Object.values(wordCounts).reduce((a,b)=>a+b,0)
+  const coveredLessons = Object.values(wordCounts).filter(c=>c>0).length
 
-      {/* Level selector */}
-      <div style={{ display:'flex', gap:'10px', marginBottom:'20px', flexWrap:'wrap' }}>
-        <div style={{ flex:1, minWidth:'160px' }}>
-          <label style={lbl}>Level</label>
-          <select value={selectedLevel} onChange={e=>setSelectedLevel(e.target.value)}
-            style={{ ...inp, marginBottom:0, appearance:'none', cursor:'pointer' }}>
-            {levels.map(l => <option key={l} value={l}>{l}</option>)}
-          </select>
+  return (
+    <div style={{ fontFamily:"'DM Sans',sans-serif" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700;800&family=DM+Sans:wght@400;500;600;700&display=swap');
+        .level-tab:hover { opacity:.85 }
+        .lesson-card:hover { border-color:${G}!important; box-shadow:0 4px 16px rgba(0,148,114,.13)!important; }
+        .word-row:hover { background:#f8fafb!important; }
+        .lesson-card { transition: border-color .15s, box-shadow .15s; }
+        .word-row    { transition: background .12s; }
+      `}</style>
+
+      {/* ── STATS BAR ── */}
+      {selectedLevel && (
+        <div style={{ display:'flex', gap:'12px', marginBottom:'24px', flexWrap:'wrap' }}>
+          {[
+            { label:'Total Words', value: totalWords, icon:'📚', color:G },
+            { label:'Lessons Covered', value:`${coveredLessons} / ${lessons.length}`, icon:'✅', color:'#6366f1' },
+            { label:'Level', value: selectedLevel, icon:'🎓', color:'#f59e0b' },
+          ].map(s => (
+            <div key={s.label} style={{ flex:1, minWidth:'140px', background:'white', borderRadius:'14px', padding:'14px 18px', border:'1px solid #f0f2f1', boxShadow:'0 1px 6px rgba(0,0,0,0.05)', display:'flex', alignItems:'center', gap:'12px' }}>
+              <span style={{ fontSize:'22px' }}>{s.icon}</span>
+              <div>
+                <div style={{ fontSize:'18px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif", lineHeight:1 }}>{s.value}</div>
+                <div style={{ fontSize:'11px', color:'#94a3b8', fontWeight:'600', marginTop:'3px' }}>{s.label}</div>
+              </div>
+            </div>
+          ))}
         </div>
-        <div style={{ flex:2, minWidth:'200px' }}>
-          <label style={lbl}>Lesson</label>
-          <select value={selectedLesson?.lesson_order||''} onChange={e=>setSelectedLesson(lessons.find(l=>l.lesson_order===+e.target.value)||null)}
-            style={{ ...inp, marginBottom:0, appearance:'none', cursor:'pointer' }}>
-            <option value=''>— choose a lesson —</option>
-            {lessons.map(l => <option key={l.lesson_order} value={l.lesson_order}>{l.lesson_order}. {l.lesson_name}</option>)}
-          </select>
-        </div>
+      )}
+
+      {/* ── LEVEL TABS ── */}
+      <div style={{ display:'flex', gap:'8px', marginBottom:'24px', overflowX:'auto', paddingBottom:'4px' }}>
+        {levels.map(l => {
+          const active = l === selectedLevel
+          return (
+            <button key={l} className="level-tab" onClick={()=>setSelectedLevel(l)}
+              style={{ padding:'8px 18px', borderRadius:'999px', border:`2px solid ${active?G:'#e4e8e7'}`, background:active?G:'white', color:active?'white':D, fontSize:'13px', fontWeight:'700', cursor:'pointer', whiteSpace:'nowrap', fontFamily:"'Plus Jakarta Sans',sans-serif", flexShrink:0, transition:'all .15s', boxShadow:active?`0 3px 12px ${G}35`:'none' }}>
+              {l}
+            </button>
+          )
+        })}
       </div>
 
-      {/* Word list */}
+      {/* ── LESSON GRID ── */}
+      {!selectedLesson && lessons.length > 0 && (
+        <div>
+          <div style={{ fontSize:'12px', fontWeight:'700', color:'#94a3b8', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:'12px' }}>Select a lesson</div>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(180px, 1fr))', gap:'10px' }}>
+            {lessons.map(l => {
+              const count = wordCounts[l.lesson_order] || 0
+              const done  = count > 0
+              return (
+                <div key={l.lesson_order} className="lesson-card" onClick={()=>setSelectedLesson(l)}
+                  style={{ background:'white', borderRadius:'14px', padding:'16px', border:`2px solid ${done?`${G}30`:'#f0f2f1'}`, cursor:'pointer', boxShadow:'0 1px 6px rgba(0,0,0,0.05)' }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'10px' }}>
+                    <span style={{ fontSize:'11px', fontWeight:'700', color:done?G:'#94a3b8', background:done?`${G}12`:'#f0f2f1', padding:'3px 8px', borderRadius:'6px' }}>
+                      {done ? `${count} words` : 'Empty'}
+                    </span>
+                    <span style={{ fontSize:'16px' }}>{done?'📗':'📄'}</span>
+                  </div>
+                  <div style={{ fontSize:'11px', color:'#94a3b8', fontWeight:'600', marginBottom:'3px' }}>Lesson {l.lesson_order}</div>
+                  <div style={{ fontSize:'13px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif", lineHeight:1.3 }}>{l.lesson_name}</div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── SELECTED LESSON: WORD LIST ── */}
       {selectedLesson && (
         <div>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'16px' }}>
-            <div>
-              <div style={{ fontSize:'17px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>{selectedLesson.lesson_name}</div>
-              <div style={{ fontSize:'12px', color:'#94a3b8', marginTop:'2px' }}>{words.length} word{words.length!==1?'s':''}</div>
+          {/* Header */}
+          <div style={{ display:'flex', alignItems:'center', gap:'12px', marginBottom:'20px' }}>
+            <button onClick={()=>{ setSelectedLesson(null); setWords([]) }}
+              style={{ width:'34px', height:'34px', borderRadius:'10px', border:'1.5px solid #e4e8e7', background:'white', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', color:'#64748b', flexShrink:0 }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+            <div style={{ flex:1 }}>
+              <div style={{ fontSize:'11px', color:'#94a3b8', fontWeight:'700', textTransform:'uppercase', letterSpacing:'.05em' }}>{selectedLevel} · Lesson {selectedLesson.lesson_order}</div>
+              <div style={{ fontSize:'18px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif", lineHeight:1.2 }}>{selectedLesson.lesson_name}</div>
             </div>
             <button onClick={()=>setShowImport(true)}
-              style={{ padding:'10px 18px', borderRadius:'10px', border:'none', background:G, color:'white', fontSize:'13px', fontWeight:'700', cursor:'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif", display:'flex', alignItems:'center', gap:'6px', boxShadow:`0 3px 12px ${G}40` }}>
+              style={{ padding:'10px 20px', borderRadius:'10px', border:'none', background:G, color:'white', fontSize:'13px', fontWeight:'700', cursor:'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif", display:'flex', alignItems:'center', gap:'7px', boxShadow:`0 3px 14px ${G}45`, flexShrink:0 }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
               Import Words
             </button>
           </div>
 
+          {/* Progress bar */}
+          {words.length > 0 && (
+            <div style={{ background:'white', borderRadius:'14px', padding:'14px 18px', marginBottom:'16px', border:'1px solid #f0f2f1', display:'flex', alignItems:'center', gap:'16px' }}>
+              <div style={{ flex:1 }}>
+                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'6px' }}>
+                  <span style={{ fontSize:'12px', fontWeight:'700', color:D }}>{words.length} words</span>
+                  <span style={{ fontSize:'12px', color:'#94a3b8' }}>{words.filter(w=>w.picture_url).length} with images</span>
+                </div>
+                <div style={{ height:'6px', borderRadius:'6px', background:'#f0f2f1', overflow:'hidden' }}>
+                  <div style={{ height:'100%', borderRadius:'6px', background:G, width:`${(words.filter(w=>w.picture_url).length/words.length)*100}%`, transition:'width .4s' }} />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Word list */}
           {loading ? (
-            <div style={{ textAlign:'center', padding:'40px', color:'#94a3b8' }}>Loading…</div>
+            <div style={{ textAlign:'center', padding:'60px', color:'#94a3b8' }}>
+              <div style={{ fontSize:'32px', marginBottom:'8px' }}>⏳</div>Loading words…
+            </div>
           ) : words.length === 0 ? (
-            <div style={{ textAlign:'center', padding:'60px 24px', background:'white', borderRadius:'16px', border:'1px solid #f0f2f1' }}>
-              <div style={{ fontSize:'36px', marginBottom:'10px' }}>📝</div>
-              <div style={{ fontSize:'15px', fontWeight:'700', color:'#111', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>No words yet</div>
-              <div style={{ fontSize:'13px', color:'#94a3b8', marginTop:'4px' }}>Click "Import Words" to add a batch via AI.</div>
+            <div style={{ textAlign:'center', padding:'70px 24px', background:'white', borderRadius:'16px', border:'2px dashed #e4e8e7' }}>
+              <div style={{ fontSize:'40px', marginBottom:'12px' }}>📝</div>
+              <div style={{ fontSize:'16px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>No words yet</div>
+              <div style={{ fontSize:'13px', color:'#94a3b8', marginTop:'6px', marginBottom:'20px' }}>Paste a word list and let AI do the heavy lifting.</div>
+              <button onClick={()=>setShowImport(true)} style={{ padding:'11px 24px', borderRadius:'12px', border:'none', background:G, color:'white', fontSize:'14px', fontWeight:'700', cursor:'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif", boxShadow:`0 3px 12px ${G}40` }}>
+                + Import Words
+              </button>
             </div>
           ) : (
-            <div style={{ display:'flex', flexDirection:'column', gap:'8px' }}>
+            <div style={{ display:'flex', flexDirection:'column', gap:'6px' }}>
               {words.map((w, i) => {
                 const hasImages = w.picture_url && w.picture_url_2 && w.picture_url_3 && w.picture_url_4
                 return (
-                  <div key={w.id} style={{ background:'white', borderRadius:'14px', padding:'13px 16px', display:'flex', alignItems:'center', gap:'12px', boxShadow:'0 1px 6px rgba(0,0,0,0.06)', border:'1px solid #f0f2f1' }}>
-                    <span style={{ fontSize:'12px', fontWeight:'700', color:'#94a3b8', minWidth:'24px' }}>{i+1}</span>
+                  <div key={w.id} className="word-row"
+                    style={{ background:'white', borderRadius:'12px', padding:'12px 16px', display:'flex', alignItems:'center', gap:'12px', border:'1px solid #f0f2f1' }}>
+                    <span style={{ fontSize:'11px', fontWeight:'700', color:'#cbd5e1', minWidth:'22px', textAlign:'right' }}>{i+1}</span>
                     <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ fontSize:'15px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>{w.word}</div>
-                      <div style={{ fontSize:'12px', color:'#64748b', marginTop:'2px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{w.definition}</div>
+                      <div style={{ fontSize:'14px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>{w.word}</div>
+                      <div style={{ fontSize:'12px', color:'#64748b', marginTop:'1px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{w.definition}</div>
                     </div>
                     {hasImages
-                      ? <span style={{ fontSize:'10px', fontWeight:'700', padding:'2px 7px', borderRadius:'6px', background:`${G}15`, color:G }}>📷 Quiz</span>
-                      : <span style={{ fontSize:'10px', fontWeight:'600', padding:'2px 7px', borderRadius:'6px', background:'#f0f2f1', color:'#94a3b8' }}>No images</span>
+                      ? <div style={{ display:'flex', gap:'3px', alignItems:'center', flexShrink:0 }}>
+                          {[w.picture_url, w.picture_url_2, w.picture_url_3, w.picture_url_4].map((u,j) => (
+                            <img key={j} src={u} alt="" style={{ width:'24px', height:'24px', borderRadius:'5px', objectFit:'cover', border:`1px solid ${j===0?G:'#e4e8e7'}` }} />
+                          ))}
+                        </div>
+                      : <span style={{ fontSize:'10px', fontWeight:'600', padding:'3px 8px', borderRadius:'6px', background:'#fff7ed', color:'#f59e0b', flexShrink:0 }}>No images</span>
                     }
                     <button onClick={()=>setEditWord(w)} style={{ padding:'6px 12px', borderRadius:'8px', border:'1.5px solid #e4e8e7', background:'white', color:'#64748b', fontSize:'12px', fontWeight:'600', cursor:'pointer', flexShrink:0 }}>Edit</button>
-                    <button onClick={()=>deleteWord(w.id)} style={{ padding:'6px 10px', borderRadius:'8px', border:'1.5px solid #fca5a5', background:'white', color:'#ef4444', fontSize:'12px', fontWeight:'600', cursor:'pointer', flexShrink:0 }}>✕</button>
+                    <button onClick={()=>deleteWord(w.id)} style={{ width:'28px', height:'28px', borderRadius:'8px', border:'1.5px solid #fca5a5', background:'white', color:'#ef4444', fontSize:'14px', fontWeight:'700', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>✕</button>
                   </div>
                 )
               })}
@@ -520,23 +579,12 @@ export default function VocabAdmin() {
 
       {/* Modals */}
       {showImport && (
-        <ImportModal
-          level={selectedLevel}
-          lessonOrder={selectedLesson.lesson_order}
-          existingCount={words.length}
-          onClose={()=>setShowImport(false)}
-          onSaved={()=>{ setShowImport(false); fetchWords() }}
-        />
+        <ImportModal level={selectedLevel} lessonOrder={selectedLesson.lesson_order} existingCount={words.length}
+          onClose={()=>setShowImport(false)} onSaved={()=>{ setShowImport(false); fetchWords() }} />
       )}
-
       {editWord && (
-        <EditWordModal
-          word={editWord}
-          level={selectedLevel}
-          lessonOrder={selectedLesson?.lesson_order}
-          onClose={()=>setEditWord(null)}
-          onSaved={()=>{ setEditWord(null); fetchWords() }}
-        />
+        <EditWordModal word={editWord} level={selectedLevel} lessonOrder={selectedLesson?.lesson_order}
+          onClose={()=>setEditWord(null)} onSaved={()=>{ setEditWord(null); fetchWords() }} />
       )}
     </div>
   )
