@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>SOMA.LENS</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap');
+
+  :root {
+    --bg: #080c10;
+    --panel: #0d1117;
+    --border: #1e2a38;
+    --text: #c8d8e8;
+    --text-dim: #4a6070;
+    --col-skeleton: #4af0c8;
+    --col-muscle:   #ff5e5e;
+    --col-organ:    #ffc44d;
+    --col-nerve:    #a78bfa;
+    --col-skin:     #f9a875;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Space Mono', monospace;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* HEADER */
+  header {
+    flex-shrink: 0;
+    height: 52px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+    z-index: 20;
+  }
+  .logo { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 17px; color: #fff; }
+  .logo span { color: var(--col-skeleton); }
+  #api-btn {
+    margin-left: auto;
+    font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
+    padding: 5px 12px; border-radius: 20px;
+    border: 1px solid var(--border); background: none; color: var(--text-dim);
+    cursor: pointer; font-family: 'Space Mono', monospace; transition: all 0.2s;
+    white-space: nowrap;
+  }
+  #api-btn:hover, #api-btn.connected { border-color: var(--col-skeleton); color: var(--col-skeleton); }
+  #api-btn.connected { background: rgba(74,240,200,0.07); }
+
+  /* MAIN LAYOUT */
+  .main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 180px 1fr;
+    grid-template-rows: 1fr auto;
+    min-height: 0;
+  }
+
+  /* LAYER SIDEBAR */
+  #sidebar {
+    grid-row: 1 / 3;
+    border-right: 1px solid var(--border);
+    padding: 14px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    overflow-y: auto;
+    background: var(--panel);
+  }
+  #sidebar h2 {
+    font-family: 'Syne', sans-serif; font-size: 9px;
+    letter-spacing: 0.2em; text-transform: uppercase;
+    color: var(--text-dim); margin-bottom: 4px; padding: 0 4px;
+  }
+  .layer-btn {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; border-radius: 10px;
+    border: 1px solid var(--border); background: transparent;
+    cursor: pointer; width: 100%; text-align: left; transition: all 0.18s;
+  }
+  .layer-btn .dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  .layer-btn .lname { font-family: 'Syne', sans-serif; font-size: 12px; font-weight: 700; color: #fff; }
+  .layer-btn .lsub { font-size: 9px; color: var(--text-dim); margin-top: 1px; }
+  .layer-btn:hover { background: rgba(255,255,255,0.03); }
+  .layer-btn[data-l="skeleton"] .dot { background: var(--col-skeleton); }
+  .layer-btn[data-l="skeleton"].active { border-color: var(--col-skeleton); box-shadow: 0 0 10px rgba(74,240,200,0.2); }
+  .layer-btn[data-l="muscle"] .dot { background: var(--col-muscle); }
+  .layer-btn[data-l="muscle"].active { border-color: var(--col-muscle); box-shadow: 0 0 10px rgba(255,94,94,0.2); }
+  .layer-btn[data-l="organ"] .dot { background: var(--col-organ); }
+  .layer-btn[data-l="organ"].active { border-color: var(--col-organ); box-shadow: 0 0 10px rgba(255,196,77,0.2); }
+  .layer-btn[data-l="nerve"] .dot { background: var(--col-nerve); }
+  .layer-btn[data-l="nerve"].active { border-color: var(--col-nerve); box-shadow: 0 0 10px rgba(167,139,250,0.2); }
+  .layer-btn[data-l="skin"] .dot { background: var(--col-skin); }
+  .layer-btn[data-l="skin"].active { border-color: var(--col-skin); box-shadow: 0 0 10px rgba(249,168,117,0.2); }
+
+  /* CAMERA AREA */
+  #cam-wrap {
+    position: relative;
+    overflow: hidden;
+    background: #05080b;
+    cursor: crosshair;
+    touch-action: none;
+  }
+  #video {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    transform: scaleX(-1);
+    display: block;
+    transition: filter 0.4s;
+  }
+  #pose-canvas {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+  }
+  #interact-layer {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+  }
+
+  /* Scan line */
+  #scan-line {
+    position: absolute; left: 0; right: 0; height: 2px;
+    opacity: 0; pointer-events: none;
+    animation: scanAnim 2.4s linear infinite;
+  }
+  #scan-line.on { opacity: 0.5; }
+  @keyframes scanAnim { from { top: 0; } to { top: 100%; } }
+
+  /* Layer badge */
+  #layer-badge {
+    position: absolute; top: 12px; left: 12px;
+    font-family: 'Syne', sans-serif; font-size: 10px; font-weight: 700;
+    letter-spacing: 0.18em; text-transform: uppercase;
+    padding: 4px 11px; border-radius: 6px; border: 1px solid currentColor;
+    pointer-events: none; opacity: 0.9;
+  }
+
+  /* Status */
+  #cam-status {
+    position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+    font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: rgba(255,255,255,0.3); pointer-events: none; white-space: nowrap;
+    transition: opacity 0.5s;
+  }
+
+  /* No camera */
+  #no-cam {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 14px; text-align: center; padding: 20px;
+  }
+  #no-cam .icon { font-size: 36px; opacity: 0.3; }
+  #no-cam p { font-size: 11px; line-height: 1.8; color: var(--text-dim); max-width: 200px; }
+  #cam-start {
+    padding: 10px 22px; background: var(--col-skeleton); color: #000;
+    border: none; border-radius: 8px; font-family: 'Syne', sans-serif;
+    font-weight: 700; font-size: 12px; cursor: pointer; text-transform: uppercase;
+  }
+
+  /* RESULT PANEL */
+  #result-panel {
+    border-top: 1px solid var(--border);
+    background: var(--panel);
+    padding: 14px 16px;
+    min-height: 130px;
+    max-height: 200px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  #result-idle {
+    display: flex; align-items: center; gap: 10px;
+    color: var(--text-dim); font-size: 11px; height: 100%;
+  }
+  #result-idle .icon { font-size: 22px; opacity: 0.4; }
+
+  #result-data { display: none; }
+  #result-name {
+    font-family: 'Syne', sans-serif; font-size: 20px; font-weight: 800;
+    color: #fff; line-height: 1.1; margin-bottom: 3px;
+  }
+  #result-latin { font-size: 10px; color: var(--text-dim); font-style: italic; margin-bottom: 8px; }
+  #result-desc { font-size: 11px; line-height: 1.75; color: var(--text); }
+  #result-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+  .tag {
+    font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase;
+    padding: 2px 7px; border-radius: 4px; border: 1px solid var(--border); color: var(--text-dim);
+  }
+
+  /* Loading overlay in result */
+  #result-loading {
+    position: absolute; inset: 0; background: rgba(13,17,23,0.92);
+    display: none; align-items: center; justify-content: center; gap: 10px;
+  }
+  #result-loading.show { display: flex; }
+  .spinner {
+    width: 22px; height: 22px; border: 2px solid var(--border);
+    border-top-color: var(--col-skeleton); border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #result-loading span { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-dim); }
+
+  /* Click ripple */
+  .ripple {
+    position: absolute; border-radius: 50%;
+    width: 36px; height: 36px;
+    border: 2px solid #fff;
+    pointer-events: none;
+    transform: translate(-50%, -50%) scale(0.3);
+    animation: rippleAnim 0.55s ease-out forwards;
+  }
+  @keyframes rippleAnim {
+    to { transform: translate(-50%,-50%) scale(1.8); opacity: 0; }
+  }
+
+  /* API Modal */
+  #modal-bg {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.82);
+    backdrop-filter: blur(8px); z-index: 100;
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; pointer-events: none; transition: opacity 0.25s;
+  }
+  #modal-bg.show { opacity: 1; pointer-events: all; }
+  #modal {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 16px; padding: 28px; width: 380px; max-width: 92vw;
+  }
+  #modal h3 { font-family: 'Syne', sans-serif; font-size: 18px; font-weight: 800; margin-bottom: 8px; }
+  #modal p { font-size: 11px; color: var(--text-dim); line-height: 1.75; margin-bottom: 18px; }
+  #modal input {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 8px; padding: 11px 13px; color: #fff;
+    font-family: 'Space Mono', monospace; font-size: 11px;
+    margin-bottom: 14px; outline: none; transition: border-color 0.2s;
+  }
+  #modal input:focus { border-color: var(--col-skeleton); }
+  #modal input::placeholder { color: var(--text-dim); }
+  .modal-row { display: flex; gap: 10px; }
+  .mbtn {
+    flex: 1; padding: 10px; border-radius: 8px;
+    font-family: 'Syne', sans-serif; font-weight: 700; font-size: 11px;
+    letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; transition: all 0.18s;
+  }
+  .mbtn.primary { background: var(--col-skeleton); color: #000; border: none; }
+  .mbtn.primary:hover { opacity: 0.85; }
+  .mbtn.secondary { background: none; border: 1px solid var(--border); color: var(--text-dim); }
+  .mbtn.secondary:hover { border-color: rgba(255,255,255,0.2); color: #fff; }
+
+  /* Mobile layout adjustments */
+  @media (max-width: 600px) {
+    .main { grid-template-columns: 1fr; grid-template-rows: 1fr auto auto; }
+    #sidebar {
+      grid-row: unset; grid-column: 1;
+      flex-direction: row; overflow-x: auto; overflow-y: hidden;
+      border-right: none; border-bottom: 1px solid var(--border);
+      padding: 10px 10px; gap: 8px;
+      order: -1;
+    }
+    #sidebar h2 { display: none; }
+    .layer-btn { flex-shrink: 0; padding: 8px 12px; flex-direction: row; }
+    .layer-btn .lsub { display: none; }
+    #cam-wrap { grid-column: 1; min-height: 0; }
+    #result-panel { max-height: 160px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">SOMA<span>.</span>LENS</div>
+  <button id="api-btn">⚙ Set API Key</button>
+</header>
+
+<div class="main">
+
+  <!-- SIDEBAR -->
+  <aside id="sidebar">
+    <h2>Layers</h2>
+    <button class="layer-btn active" data-l="skeleton">
+      <div class="dot"></div>
+      <div><div class="lname">Skeleton</div><div class="lsub">Bones & joints</div></div>
+    </button>
+    <button class="layer-btn" data-l="muscle">
+      <div class="dot"></div>
+      <div><div class="lname">Muscle</div><div class="lsub">Muscles & tendons</div></div>
+    </button>
+    <button class="layer-btn" data-l="organ">
+      <div class="dot"></div>
+      <div><div class="lname">Organs</div><div class="lsub">Internal organs</div></div>
+    </button>
+    <button class="layer-btn" data-l="nerve">
+      <div class="dot"></div>
+      <div><div class="lname">Nervous</div><div class="lsub">Nerves & brain</div></div>
+    </button>
+    <button class="layer-btn" data-l="skin">
+      <div class="dot"></div>
+      <div><div class="lname">Skin</div><div class="lsub">Dermis layers</div></div>
+    </button>
+  </aside>
+
+  <!-- CAMERA -->
+  <div id="cam-wrap">
+    <video id="video" playsinline autoplay muted></video>
+    <canvas id="pose-canvas"></canvas>
+    <div id="interact-layer"></div>
+    <div id="scan-line"></div>
+    <div id="layer-badge">Skeleton</div>
+    <div id="cam-status">Tap or click a body part to identify</div>
+    <div id="no-cam">
+      <div class="icon">📷</div>
+      <p>Allow camera to begin</p>
+      <button id="cam-start">Enable Camera</button>
+    </div>
+  </div>
+
+  <!-- RESULT -->
+  <div id="result-panel">
+    <div id="result-idle">
+      <span class="icon">🔬</span>
+      <span>Select a layer, then tap/click any part of your body</span>
+    </div>
+    <div id="result-data">
+      <div id="result-name"></div>
+      <div id="result-latin"></div>
+      <div id="result-desc"></div>
+      <div id="result-tags"></div>
+    </div>
+    <div id="result-loading">
+      <div class="spinner"></div>
+      <span>Identifying…</span>
+    </div>
+  </div>
+
+</div>
+
+<!-- API MODAL -->
+<div id="modal-bg">
+  <div id="modal">
+    <h3>Anthropic API Key</h3>
+    <p>Enter your Anthropic API key to enable AI identification. Stored only for this session.</p>
+    <input type="password" id="key-input" placeholder="sk-ant-api03-..." autocomplete="off">
+    <div class="modal-row">
+      <button class="mbtn secondary" id="modal-cancel">Cancel</button>
+      <button class="mbtn primary" id="modal-save">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- TF + MediaPipe -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.js"></script>
+
+<script>
+// ── CONFIG ──
+const LAYER_COLORS = {
+  skeleton: '#4af0c8', muscle: '#ff5e5e',
+  organ: '#ffc44d',   nerve: '#a78bfa', skin: '#f9a875'
+};
+const LAYER_FILTERS = {
+  skeleton: 'grayscale(0.85) contrast(1.5) brightness(0.7)',
+  muscle:   'saturate(0.4) contrast(1.4) sepia(0.5) hue-rotate(330deg) brightness(0.75)',
+  organ:    'saturate(0.3) contrast(1.3) sepia(0.7) hue-rotate(15deg) brightness(0.7)',
+  nerve:    'grayscale(0.5) contrast(1.2) hue-rotate(260deg) brightness(0.65) saturate(0.9)',
+  skin:     'saturate(0.7) contrast(1.1) brightness(0.85)',
+};
+
+// Skeleton connections for drawing
+const CONNECTIONS = [
+  [0,1],[1,3],[0,2],[2,4],           // face
+  [5,6],                              // shoulders
+  [5,7],[7,9],[6,8],[8,10],          // arms
+  [5,11],[6,12],[11,12],             // torso
+  [11,13],[13,15],[12,14],[14,16],   // legs
+];
+
+// ── STATE ──
+let apiKey = '';
+let currentLayer = 'skeleton';
+let detector = null;
+let cameraOn = false;
+let busy = false;
+let animFrame = null;
+let lastPoses = [];
+
+const video      = document.getElementById('video');
+const poseCanvas = document.getElementById('pose-canvas');
+const pCtx       = poseCanvas.getContext('2d');
+const interactEl = document.getElementById('interact-layer');
+const scanLine   = document.getElementById('scan-line');
+
+// ── RESIZE CANVAS ──
+function resizeCanvas() {
+  const wrap = document.getElementById('cam-wrap');
+  poseCanvas.width  = wrap.offsetWidth;
+  poseCanvas.height = wrap.offsetHeight;
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// ── CAMERA ──
+async function startCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }
+    });
+    video.srcObject = stream;
+    await new Promise(r => video.onloadeddata = r);
+    document.getElementById('no-cam').style.display = 'none';
+    cameraOn = true;
+    applyLayer();
+    await loadDetector();
+    startLoop();
+  } catch(e) {
+    document.querySelector('#no-cam p').textContent = 'Camera denied. Please allow access and reload.';
+  }
+}
+document.getElementById('cam-start').addEventListener('click', startCamera);
+startCamera();
+
+// ── POSE DETECTOR ──
+async function loadDetector() {
+  document.getElementById('cam-status').textContent = 'Loading pose model…';
+  await tf.ready();
+  detector = await poseDetection.createDetector(
+    poseDetection.SupportedModels.MoveNet,
+    { modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING }
+  );
+  document.getElementById('cam-status').textContent = 'Tap or click a body part to identify';
+}
+
+// ── RENDER LOOP ──
+function startLoop() {
+  async function loop() {
+    if (video.readyState >= 2 && detector) {
+      try {
+        lastPoses = await detector.estimatePoses(video);
+      } catch(e) {}
+      drawPoses();
+    }
+    animFrame = requestAnimationFrame(loop);
+  }
+  loop();
+}
+
+function drawPoses() {
+  const W = poseCanvas.width, H = poseCanvas.height;
+  pCtx.clearRect(0, 0, W, H);
+
+  // Tint overlay
+  const col = LAYER_COLORS[currentLayer];
+  pCtx.fillStyle = col + '10';
+  pCtx.fillRect(0, 0, W, H);
+
+  // Vignette
+  const grad = pCtx.createRadialGradient(W/2, H/2, H*0.25, W/2, H/2, H*0.8);
+  grad.addColorStop(0, 'transparent');
+  grad.addColorStop(1, 'rgba(5,8,11,0.55)');
+  pCtx.fillStyle = grad;
+  pCtx.fillRect(0, 0, W, H);
+
+  if (!lastPoses.length) return;
+  const kps = lastPoses[0].keypoints;
+
+  // Map keypoints from video coords to canvas coords (mirrored)
+  function toCanvas(kp) {
+    const vW = video.videoWidth  || 640;
+    const vH = video.videoHeight || 480;
+    // object-fit:cover scaling
+    const scaleX = W / vW;
+    const scaleY = H / vH;
+    const scale  = Math.max(scaleX, scaleY);
+    const offX   = (W - vW * scale) / 2;
+    const offY   = (H - vH * scale) / 2;
+    return {
+      x: W - (kp.x * scale + offX),  // mirror
+      y: kp.y * scale + offY,
+      score: kp.score
+    };
+  }
+
+  const pts = kps.map(toCanvas);
+
+  // Draw bones
+  pCtx.strokeStyle = col;
+  pCtx.lineWidth   = currentLayer === 'nerve' ? 1.5 : 2.5;
+  pCtx.shadowColor = col;
+  pCtx.shadowBlur  = 8;
+  pCtx.lineCap     = 'round';
+
+  for (const [a, b] of CONNECTIONS) {
+    if (pts[a].score > 0.25 && pts[b].score > 0.25) {
+      pCtx.beginPath();
+      pCtx.moveTo(pts[a].x, pts[a].y);
+      pCtx.lineTo(pts[b].x, pts[b].y);
+      pCtx.stroke();
+    }
+  }
+
+  // Draw joints
+  for (const pt of pts) {
+    if (pt.score < 0.25) continue;
+    pCtx.beginPath();
+    pCtx.arc(pt.x, pt.y, currentLayer === 'skeleton' ? 5 : 4, 0, Math.PI * 2);
+    pCtx.fillStyle   = col;
+    pCtx.shadowBlur  = 14;
+    pCtx.fill();
+  }
+
+  pCtx.shadowBlur = 0;
+}
+
+// ── LAYER SWITCH ──
+document.querySelectorAll('.layer-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.layer-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentLayer = btn.dataset.l;
+    applyLayer();
+  });
+});
+
+function applyLayer() {
+  video.style.filter = LAYER_FILTERS[currentLayer];
+  const badge = document.getElementById('layer-badge');
+  const names = { skeleton:'SKELETON', muscle:'MUSCLE', organ:'ORGANS', nerve:'NERVOUS', skin:'SKIN' };
+  badge.textContent = names[currentLayer];
+  badge.style.color = LAYER_COLORS[currentLayer];
+  scanLine.style.background = `linear-gradient(90deg, transparent, ${LAYER_COLORS[currentLayer]}, transparent)`;
+}
+
+// ── INTERACTION (mouse + touch) ──
+function getEventPos(e) {
+  const rect = interactEl.getBoundingClientRect();
+  if (e.touches) {
+    return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top };
+  }
+  return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+}
+
+function handleInteraction(e) {
+  e.preventDefault();
+  if (!cameraOn || busy) return;
+  const pos = getEventPos(e);
+  spawnRipple(pos.x, pos.y);
+  identify(pos.x, pos.y);
+}
+
+interactEl.addEventListener('click', handleInteraction);
+interactEl.addEventListener('touchend', handleInteraction, { passive: false });
+
+function spawnRipple(x, y) {
+  const el = document.createElement('div');
+  el.className = 'ripple';
+  el.style.left = x + 'px';
+  el.style.top  = y + 'px';
+  el.style.borderColor = LAYER_COLORS[currentLayer];
+  document.getElementById('cam-wrap').appendChild(el);
+  setTimeout(() => el.remove(), 600);
+}
+
+// ── NEAREST KEYPOINT ──
+function nearestKeypoint(tapX, tapY) {
+  if (!lastPoses.length) return null;
+  const kps  = lastPoses[0].keypoints;
+  const W    = poseCanvas.width;
+  const H    = poseCanvas.height;
+  const vW   = video.videoWidth  || 640;
+  const vH   = video.videoHeight || 480;
+  const scale = Math.max(W / vW, H / vH);
+  const offX  = (W - vW * scale) / 2;
+  const offY  = (H - vH * scale) / 2;
+
+  const KP_NAMES = [
+    'nose','left eye','right eye','left ear','right ear',
+    'left shoulder','right shoulder','left elbow','right elbow',
+    'left wrist','right wrist','left hip','right hip',
+    'left knee','right knee','left ankle','right ankle'
+  ];
+
+  let best = null, bestDist = Infinity;
+  kps.forEach((kp, i) => {
+    if (kp.score < 0.25) return;
+    const cx = W - (kp.x * scale + offX);
+    const cy = kp.y * scale + offY;
+    const d  = Math.hypot(tapX - cx, tapY - cy);
+    if (d < bestDist) { bestDist = d; best = { name: KP_NAMES[i], dist: d }; }
+  });
+  return best;
+}
+
+// ── CAPTURE FRAME ──
+function captureFrame() {
+  const tmp   = document.createElement('canvas');
+  tmp.width   = video.videoWidth  || 640;
+  tmp.height  = video.videoHeight || 480;
+  const tCtx  = tmp.getContext('2d');
+  tCtx.translate(tmp.width, 0);
+  tCtx.scale(-1, 1);
+  tCtx.drawImage(video, 0, 0);
+  return tmp.toDataURL('image/jpeg', 0.82).split(',')[1];
+}
+
+// ── IDENTIFY WITH CLAUDE ──
+async function identify(tapX, tapY) {
+  if (!apiKey) { showModal(); return; }
+
+  busy = true;
+  setLoading(true);
+  scanLine.classList.add('on');
+
+  const nearest  = nearestKeypoint(tapX, tapY);
+  const xFrac    = (tapX / poseCanvas.width).toFixed(2);
+  const yFrac    = (tapY / poseCanvas.height).toFixed(2);
+  const imageB64 = captureFrame();
+
+  const layerInfo = {
+    skeleton: 'bones, joints, and skeletal structures',
+    muscle:   'muscles, tendons, and muscular structures',
+    organ:    'internal organs and organ systems',
+    nerve:    'nerves, neural pathways, and nervous system structures',
+    skin:     'skin layers, dermis, epidermis, and surface anatomy',
+  };
+
+  const nearestHint = nearest
+    ? `The nearest detected body landmark is the "${nearest.name}" (${Math.round(nearest.dist)}px away).`
+    : '';
+
+  const prompt = `You are an anatomy expert in a body-layer AR viewer app.
+
+The user is viewing themselves through a webcam with the "${currentLayer}" layer active, which highlights ${layerInfo[currentLayer]}.
+
+They tapped at image position (${xFrac}, ${yFrac}) — where 0,0 is top-left and 1,1 is bottom-right. ${nearestHint}
+
+Look at the image to determine which body part is visible at that location, then identify the most relevant "${currentLayer}" structure there.
+
+Reply ONLY with this JSON (no markdown, no extra text):
+{
+  "name": "Common name",
+  "latin": "Latin/medical term",
+  "description": "2–3 engaging, educational sentences about this structure.",
+  "tags": ["tag1", "tag2", "tag3"]
+}`;
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 400,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: imageB64 } },
+            { type: 'text', text: prompt }
+          ]
+        }]
+      })
+    });
+
+    const data = await res.json();
+    if (data.error) throw new Error(data.error.message);
+
+    const parsed = JSON.parse(data.content[0].text.trim());
+    showResult(parsed);
+  } catch(e) {
+    showResult({ name: 'Error', latin: '', description: e.message, tags: [] }, true);
+  } finally {
+    busy = false;
+    setLoading(false);
+    scanLine.classList.remove('on');
+  }
+}
+
+// ── RESULT UI ──
+function setLoading(on) {
+  document.getElementById('result-loading').classList.toggle('show', on);
+}
+
+function showResult(data, isError = false) {
+  document.getElementById('result-idle').style.display = 'none';
+  const rd = document.getElementById('result-data');
+  rd.style.display = 'block';
+
+  const col = isError ? '#ff5e5e' : LAYER_COLORS[currentLayer];
+  document.getElementById('result-name').textContent  = data.name || '—';
+  document.getElementById('result-name').style.color  = col;
+  document.getElementById('result-latin').textContent = data.latin || '';
+  document.getElementById('result-desc').textContent  = data.description || '';
+
+  const tagsEl = document.getElementById('result-tags');
+  tagsEl.innerHTML = '';
+  (data.tags || []).forEach(t => {
+    const el = document.createElement('div');
+    el.className = 'tag'; el.textContent = t;
+    tagsEl.appendChild(el);
+  });
+}
+
+// ── API MODAL ──
+function showModal() {
+  document.getElementById('modal-bg').classList.add('show');
+  document.getElementById('key-input').focus();
+}
+document.getElementById('api-btn').addEventListener('click', showModal);
+document.getElementById('modal-cancel').addEventListener('click', () => {
+  document.getElementById('modal-bg').classList.remove('show');
+});
+document.getElementById('modal-save').addEventListener('click', () => {
+  const val = document.getElementById('key-input').value.trim();
+  if (val) {
+    apiKey = val;
+    const btn = document.getElementById('api-btn');
+    btn.textContent = '✓ Connected';
+    btn.classList.add('connected');
+  }
+  document.getElementById('modal-bg').classList.remove('show');
+});
+document.getElementById('key-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('modal-save').click();
+});
+document.getElementById('modal-bg').addEventListener('click', e => {
+  if (e.target === document.getElementById('modal-bg'))
+    document.getElementById('modal-bg').classList.remove('show');
+});
+</script>
+</body>
+</html>

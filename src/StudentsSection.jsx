@@ -106,19 +106,24 @@ function TransferModal({ student, currentGroup, onClose, onDone }) {
 
 // ── ADD STUDENT MODAL ─────────────────────────────────────────────────────────
 function AddStudentModal({ group, onClose, onSaved }) {
-  const [fullName, setFullName] = useState('')
-  const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
-  const [saving,   setSaving]   = useState(false)
-  const [error,    setError]    = useState('')
+  const [fullName,     setFullName]     = useState('')
+  const [username,     setUsername]     = useState('')
+  const [password,     setPassword]     = useState('')
+  const [phone,        setPhone]        = useState('')
+  const [enrolledDate, setEnrolledDate] = useState(new Date().toISOString().slice(0,10))
+  const [saving,       setSaving]       = useState(false)
+  const [error,        setError]        = useState('')
 
   const save = async () => {
-    if (!fullName.trim() || !username.trim() || !password.trim()) { setError('All fields are required.'); return }
+    if (!fullName.trim() || !username.trim() || !password.trim()) { setError('Full name, username and password are required.'); return }
     setSaving(true); setError('')
     const { error: err } = await supabase.from('students').insert({
       username: username.trim().toLowerCase(), password: password.trim(),
       full_name: fullName.trim(), teacher_username: group.teacher_username,
       day: group.day, class_time: group.class_time, coins: 0, gems: 0,
+      phone: phone.trim() || null,
+      enrolled_date: enrolledDate || new Date().toISOString().slice(0,10),
+      status: 'active',
     })
     if (err) { setError(err.code==='23505'?'Username already taken.':err.message); setSaving(false); return }
     onSaved()
@@ -127,18 +132,22 @@ function AddStudentModal({ group, onClose, onSaved }) {
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:200, padding:'24px', fontFamily:"'DM Sans',sans-serif" }}
       onClick={e=>e.target===e.currentTarget&&onClose()}>
-      <div style={{ background:'white', borderRadius:'20px', padding:'26px', width:'100%', maxWidth:'400px', boxShadow:'0 20px 60px rgba(0,0,0,0.2)' }}>
+      <div style={{ background:'white', borderRadius:'20px', padding:'26px', width:'100%', maxWidth:'440px', boxShadow:'0 20px 60px rgba(0,0,0,0.2)', maxHeight:'90vh', overflowY:'auto' }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'6px' }}>
           <span style={{ fontSize:'17px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>Add Student</span>
           <button onClick={onClose} style={{ width:'30px', height:'30px', borderRadius:'8px', background:'#f0f2f1', border:'none', cursor:'pointer', fontSize:'15px' }}>✕</button>
         </div>
         <div style={{ fontSize:'12px', color:'#94a3b8', marginBottom:'18px' }}>{group.level} · {dayLabel(group.day)} · {TIME_SLOTS[group.class_time]}</div>
-        <label style={lbl}>Full Name</label>
+        <label style={lbl}>Full Name *</label>
         <input value={fullName} onChange={e=>setFullName(e.target.value)} placeholder="e.g. Robiya Inoyatova" style={inp} />
-        <label style={lbl}>Username</label>
+        <label style={lbl}>Username *</label>
         <input value={username} onChange={e=>setUsername(e.target.value)} placeholder="e.g. robiya" autoCapitalize="none" style={inp} />
-        <label style={lbl}>Password</label>
-        <input value={password} onChange={e=>setPassword(e.target.value)} placeholder="Set a password" style={{ ...inp, marginBottom: error ? '8px' : '16px' }} />
+        <label style={lbl}>Password *</label>
+        <input value={password} onChange={e=>setPassword(e.target.value)} placeholder="Set a password" style={inp} />
+        <label style={lbl}>Phone Number</label>
+        <input value={phone} onChange={e=>setPhone(e.target.value)} placeholder="+998 90 123 45 67" style={inp} />
+        <label style={lbl}>Enrolled Date</label>
+        <input type="date" value={enrolledDate} onChange={e=>setEnrolledDate(e.target.value)} style={{ ...inp, marginBottom: error ? '8px' : '16px' }} />
         {error && <div style={{ color:'#ef4444', fontSize:'13px', fontWeight:'600', marginBottom:'14px' }}>{error}</div>}
         <div style={{ display:'flex', gap:'10px' }}>
           <button onClick={onClose} style={{ flex:1, padding:'12px', borderRadius:'12px', border:'1.5px solid #e4e8e7', background:'white', color:'#64748b', fontSize:'14px', fontWeight:'600', cursor:'pointer' }}>Cancel</button>
@@ -155,13 +164,42 @@ function AddStudentModal({ group, onClose, onSaved }) {
 function EditStudentModal({ student, group, onClose, onSaved }) {
   const [fullName,     setFullName]     = useState(student.full_name)
   const [password,     setPassword]     = useState(student.password || '')
+  const [phone,        setPhone]        = useState(student.phone || '')
+  const [enrolledDate, setEnrolledDate] = useState(student.enrolled_date || new Date().toISOString().slice(0,10))
+  const [status,       setStatus]       = useState(student.status || 'active')
+  const [leftDate,     setLeftDate]     = useState(student.left_date || '')
   const [saving,       setSaving]       = useState(false)
   const [error,        setError]        = useState('')
   const [showTransfer, setShowTransfer] = useState(false)
+  const [confirmDel,   setConfirmDel]   = useState(false)
+  const [deleting,     setDeleting]     = useState(false)
+
+  const deleteStudent = async () => {
+    setDeleting(true)
+    // Delete related records first (in case CASCADE isn't set up)
+    await Promise.all([
+      supabase.from('attendance').delete().eq('student_username', student.username),
+      supabase.from('homework_submissions').delete().eq('student_username', student.username),
+      supabase.from('vocabulary_progress').delete().eq('student_username', student.username),
+      supabase.from('word_of_day_history').delete().eq('student_username', student.username),
+      supabase.from('payments').delete().eq('student_username', student.username),
+    ])
+    const { error: err } = await supabase.from('students').delete().eq('username', student.username)
+    if (err) { setError(err.message); setDeleting(false); setConfirmDel(false); return }
+    onSaved()
+  }
 
   const save = async () => {
+    if (status === 'left' && !leftDate) { setError('Please set the date the student left.'); return }
     setSaving(true); setError('')
-    const { error: err } = await supabase.from('students').update({ full_name: fullName.trim(), password: password.trim() }).eq('username', student.username)
+    const { error: err } = await supabase.from('students').update({
+      full_name: fullName.trim(),
+      password: password.trim(),
+      phone: phone.trim() || null,
+      enrolled_date: enrolledDate || null,
+      status,
+      left_date: status === 'left' ? leftDate : null,
+    }).eq('username', student.username)
     if (err) { setError(err.message); setSaving(false); return }
     onSaved()
   }
@@ -175,7 +213,7 @@ function EditStudentModal({ student, group, onClose, onSaved }) {
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:200, padding:'24px', fontFamily:"'DM Sans',sans-serif" }}
       onClick={e=>e.target===e.currentTarget&&onClose()}>
-      <div style={{ background:'white', borderRadius:'20px', padding:'26px', width:'100%', maxWidth:'400px', boxShadow:'0 20px 60px rgba(0,0,0,0.2)' }}>
+      <div style={{ background:'white', borderRadius:'20px', padding:'26px', width:'100%', maxWidth:'440px', boxShadow:'0 20px 60px rgba(0,0,0,0.2)', maxHeight:'90vh', overflowY:'auto' }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'18px' }}>
           <span style={{ fontSize:'17px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>Edit Student</span>
           <button onClick={onClose} style={{ width:'30px', height:'30px', borderRadius:'8px', background:'#f0f2f1', border:'none', cursor:'pointer', fontSize:'15px' }}>✕</button>
@@ -187,12 +225,54 @@ function EditStudentModal({ student, group, onClose, onSaved }) {
         <input value={fullName} onChange={e=>setFullName(e.target.value)} style={inp} />
         <label style={lbl}>Password</label>
         <input value={password} onChange={e=>setPassword(e.target.value)} style={inp} />
+        <label style={lbl}>Phone Number</label>
+        <input value={phone} onChange={e=>setPhone(e.target.value)} placeholder="+998 90 123 45 67" style={inp} />
+        <label style={lbl}>Enrolled Date</label>
+        <input type="date" value={enrolledDate} onChange={e=>setEnrolledDate(e.target.value)} style={inp} />
+        <label style={lbl}>Status</label>
+        <div style={{ display:'flex', gap:'8px', marginBottom:'14px' }}>
+          {['active','left'].map(s => (
+            <button key={s} onClick={()=>setStatus(s)} style={{ flex:1, padding:'10px', borderRadius:'10px', border:`1.5px solid ${status===s?(s==='active'?G:'#ef4444'):'#e4e8e7'}`, background: status===s?(s==='active'?`${G}10`:'#fde8e8'):'white', color: status===s?(s==='active'?G:'#ef4444'):'#64748b', fontSize:'13px', fontWeight:'700', cursor:'pointer', textTransform:'capitalize' }}>
+              {s === 'active' ? '✓ Active' : '✗ Left'}
+            </button>
+          ))}
+        </div>
+        {status === 'left' && (
+          <>
+            <label style={lbl}>Date Left</label>
+            <input type="date" value={leftDate} onChange={e=>setLeftDate(e.target.value)} style={inp} />
+          </>
+        )}
         {error && <div style={{ color:'#ef4444', fontSize:'13px', fontWeight:'600', marginBottom:'12px' }}>{error}</div>}
         <button onClick={() => setShowTransfer(true)}
           style={{ width:'100%', padding:'11px', borderRadius:'10px', border:`1.5px solid ${G}`, background:'white', color:G, fontSize:'13px', fontWeight:'700', cursor:'pointer', marginBottom:'14px', display:'flex', alignItems:'center', justifyContent:'center', gap:'6px' }}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={G} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
           Transfer to another group
         </button>
+        {/* ── Delete student ── */}
+        {!confirmDel ? (
+          <button onClick={() => setConfirmDel(true)}
+            style={{ width:'100%', padding:'10px', borderRadius:'10px', border:'1.5px solid #fde8e8', background:'white', color:'#ef4444', fontSize:'13px', fontWeight:'700', cursor:'pointer', marginBottom:'12px', marginTop:'4px' }}>
+            🗑 Delete Student
+          </button>
+        ) : (
+          <div style={{ background:'#fde8e8', borderRadius:'12px', padding:'14px 16px', marginBottom:'12px' }}>
+            <div style={{ fontSize:'13px', fontWeight:'700', color:'#991b1b', marginBottom:'10px' }}>
+              Permanently delete <strong>{student.full_name}</strong>? This removes all their data — attendance, homework, payments. This cannot be undone.
+            </div>
+            <div style={{ display:'flex', gap:'8px' }}>
+              <button onClick={() => setConfirmDel(false)}
+                style={{ flex:1, padding:'9px', borderRadius:'9px', border:'1.5px solid #fca5a5', background:'white', color:'#64748b', fontSize:'13px', fontWeight:'600', cursor:'pointer' }}>
+                Cancel
+              </button>
+              <button onClick={deleteStudent} disabled={deleting}
+                style={{ flex:2, padding:'9px', borderRadius:'9px', border:'none', background:'#ef4444', color:'white', fontSize:'13px', fontWeight:'700', cursor:'pointer' }}>
+                {deleting ? 'Deleting…' : 'Yes, delete permanently'}
+              </button>
+            </div>
+          </div>
+        )}
+
         <div style={{ display:'flex', gap:'10px' }}>
           <button onClick={onClose} style={{ flex:1, padding:'12px', borderRadius:'12px', border:'1.5px solid #e4e8e7', background:'white', color:'#64748b', fontSize:'14px', fontWeight:'600', cursor:'pointer' }}>Cancel</button>
           <button onClick={save} disabled={saving} style={{ flex:2, padding:'12px', borderRadius:'12px', border:'none', background:G, color:'white', fontSize:'14px', fontWeight:'700', cursor:'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>

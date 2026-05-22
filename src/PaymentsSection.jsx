@@ -1,161 +1,214 @@
 import { useState, useEffect } from 'react'
 import { supabase } from './supabase'
 
-const G = '#009472'
-const D = '#002b2a'
-const TIMES = ['9:30','14:30','16:30','18:30']
+const G    = '#009472'
+const DARK = '#002b2a'
+const MONTHS  = ['January','February','March','April','May','June',
+                 'July','August','September','October','November','December']
+const METHODS = ['Cash','Card','Transfer']
+const PRESET_AMOUNTS = [550000, 600000, 650000]
 
-const iStyle = { width:'100%', padding:'9px 12px', borderRadius:'8px', border:'1.5px solid #e4e8e7', fontSize:'14px', outline:'none', color:D, fontFamily:"'DM Sans',sans-serif", marginBottom:'12px', boxSizing:'border-box', background:'white' }
-const lStyle = { fontSize:'11px', fontWeight:'700', color:'#64748b', textTransform:'uppercase', letterSpacing:'0.06em', display:'block', marginBottom:'5px' }
-
-const downloadCheque = (payment, studentName) => {
-  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Receipt</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Georgia',serif;background:#f0f2f1;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}.cheque{width:620px;background:white;border-radius:16px;overflow:hidden;border:2px solid ${G};box-shadow:0 8px 32px rgba(0,43,42,.15)}.ch-header{background:${D};color:white;padding:28px 36px;display:flex;justify-content:space-between;align-items:center}.logo{font-size:22px;font-weight:700;letter-spacing:-.3px}.num{text-align:right;font-size:12px;opacity:.7}.num span{display:block;font-size:22px;font-weight:700;opacity:1;margin-top:4px;color:${G}}.ch-body{padding:36px}.row{display:flex;justify-content:space-between;padding:12px 0;border-bottom:1px solid #f0f2f1}.key{font-size:12px;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px;font-weight:600}.val{font-size:15px;color:${D};font-weight:600}.amount-box{background:#f0faf7;border-radius:12px;padding:24px;margin:20px 0;display:flex;justify-content:space-between;align-items:center}.ak{font-size:13px;color:${G};font-weight:700;text-transform:uppercase;letter-spacing:.04em}.av{font-size:32px;color:${G};font-weight:800;font-family:sans-serif}.sigs{margin-top:32px;display:flex;justify-content:space-between}.sb{text-align:center}.sl{width:180px;border-bottom:2px solid ${D};height:44px;margin-bottom:8px}.slb{font-size:11px;color:#94a3b8;letter-spacing:.04em}.footer{background:#f8fafb;padding:16px 36px;border-top:1px solid #f0f2f1;display:flex;justify-content:space-between}.fs{font-size:11px;color:${G};font-weight:600}</style></head><body><div class="cheque"><div class="ch-header"><div class="logo">Smart Learning Center</div><div class="num">Official Receipt<span>#${payment.cheque_number||'—'}</span></div></div><div class="ch-body"><div class="row"><span class="key">Student</span><span class="val">${studentName}</span></div><div class="row"><span class="key">Payment Month</span><span class="val">${payment.payment_month||payment.month||'—'}</span></div><div class="row"><span class="key">Payment Date</span><span class="val">${payment.payment_date||'—'}</span></div><div class="row"><span class="key">Payment Time</span><span class="val">${payment.payment_time||'—'}</span></div><div class="row" style="border:none"><span class="key">Method</span><span class="val" style="text-transform:capitalize">${payment.method||'Cash'}</span></div><div class="amount-box"><span class="ak">Amount Paid</span><span class="av">${Number(payment.amount||0).toLocaleString()} UZS</span></div><div class="sigs"><div class="sb"><div class="sl"></div><div class="slb">Student Signature</div></div><div class="sb"><div class="sl"></div><div class="slb">Administrator</div></div></div></div><div class="footer"><span class="fs">Smart Learning Center · Official Receipt</span><span class="fs">Keep this for your records</span></div></div></body></html>`
-  const blob = new Blob([html], { type:'text/html' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url; a.download = `Receipt_${payment.cheque_number}_${studentName.replace(/\s+/g,'_')}.html`; a.click()
-  URL.revokeObjectURL(url)
+function fmt(n) {
+  return Number(n).toLocaleString('fr-FR').replace(/\u202f/g,' ')
+}
+function fmtDateTime(ts) {
+  if (!ts) return '—'
+  const d = new Date(ts)
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}  ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+}
+function dayLabel(day) {
+  return day === 'odd' ? 'Mon / Wed / Fri' : 'Tue / Thu / Sat'
+}
+function studentInMonth(s, month, year) {
+  const monthStart = new Date(year, month - 1, 1)
+  const monthEnd   = new Date(year, month, 0)
+  const enrolled   = s.enrolled_date ? new Date(s.enrolled_date + 'T00:00:00') : null
+  if (enrolled && enrolled > monthEnd) return false
+  if (s.status === 'left') {
+    const left = s.left_date ? new Date(s.left_date + 'T00:00:00') : null
+    if (!left || left < monthStart) return false
+  }
+  return true
 }
 
-function PaymentForm({ teachers, students, payments, month, editPayment, prefilledStudent, onSave, onClose }) {
-  const [payStudent, setPayStudent] = useState(editPayment?.student_username || '')
-  const [payTeacher, setPayTeacher] = useState('')
-  const [payGroup, setPayGroup]     = useState('')
-  const [payAmount, setPayAmount]   = useState(String(editPayment?.amount || '550000'))
-  const [payMethod, setPayMethod]   = useState(editPayment?.method || 'cash')
-  const [payDate, setPayDate]       = useState(editPayment?.payment_date || new Date().toISOString().slice(0,10))
-  const [payTime, setPayTime]       = useState(editPayment?.payment_time || new Date().toTimeString().slice(0,5))
-  const [payNotes, setPayNotes]     = useState(editPayment?.notes || '')
-  const [saving, setSaving]         = useState(false)
+const inpStyle = {
+  width:'100%', padding:'10px 12px', borderRadius:'10px',
+  border:'1.5px solid #e4e8e7', fontSize:'14px', color:DARK,
+  outline:'none', boxSizing:'border-box',
+  fontFamily:"'DM Sans',sans-serif", background:'white',
+}
+const lbl = {
+  fontSize:'11px', fontWeight:'700', color:'#64748b',
+  textTransform:'uppercase', letterSpacing:'0.05em',
+  display:'block', marginBottom:'6px', marginTop:'14px',
+}
 
-  useEffect(() => {
-    if (editPayment?.student_username) {
-      const s = students.find(s => s.username === editPayment.student_username)
-      if (s) {
-        setPayTeacher(s.teacher_username)
-        setPayGroup(`${s.day}-${s.class_time}`)
-      }
-    }
-  }, [editPayment])
+// ── RECORD / EDIT PAYMENT MODAL ───────────────────────────────────────────────
+function PaymentModal({ payment, prefill, allStudents, allGroups, month, year, teachers, onClose, onSaved }) {
+  const isEdit = !!payment
 
-  useEffect(() => {
-    if (prefilledStudent) {
-      setPayTeacher(prefilledStudent.teacher_username)
-      setPayGroup(`${prefilledStudent.day}-${prefilledStudent.class_time}`)
-      setPayStudent(prefilledStudent.username)
-    }
-  }, [prefilledStudent])
+  // Work out initial teacher/group/student from prefill or existing payment
+  const initStudent = prefill?.username || payment?.student_username || ''
+  const initStu     = allStudents.find(s => s.username === initStudent)
+  const initTeacher = prefill?.teacher_username || initStu?.teacher_username || payment?.teacher_username || ''
+  const initGroupKey = initStu ? `${initStu.day}|${initStu.class_time}` : ''
+
+  const [teacherU,  setTeacherU]  = useState(initTeacher)
+  const [groupKey,  setGroupKey]  = useState(initGroupKey)
+  const [studentU,  setStudentU]  = useState(initStudent)
+  const [amount,    setAmount]    = useState(isEdit ? String(payment.amount) : '')
+  const [method,    setMethod]    = useState(isEdit ? (payment.method||'Cash') : 'Cash')
+  const [payDate,   setPayDate]   = useState(
+    isEdit && payment.payment_date ? payment.payment_date.slice(0,10)
+    : new Date().toISOString().slice(0,10))
+  const [payTime,   setPayTime]   = useState(
+    isEdit && payment.payment_date ? payment.payment_date.slice(11,16)
+    : new Date().toTimeString().slice(0,5))
+  const [notes,     setNotes]     = useState(isEdit ? (payment.notes||'') : '')
+  const [saving,    setSaving]    = useState(false)
+  const [error,     setError]     = useState('')
+
+  // Groups for selected teacher
+  const teacherGroups = allGroups.filter(g => g.teacher_username === teacherU)
+
+  // Students in selected group, filtered to this month
+  const [gDay, gTime] = groupKey.split('|')
+  const groupStudents = allStudents.filter(s =>
+    s.teacher_username === teacherU &&
+    s.day === gDay &&
+    s.class_time === gTime &&
+    studentInMonth(s, month, year)
+  )
+
+  const handleTeacherChange = (v) => { setTeacherU(v); setGroupKey(''); setStudentU('') }
+  const handleGroupChange   = (v) => { setGroupKey(v); setStudentU('') }
 
   const save = async () => {
-    if (!payStudent) { alert('Select a student!'); return }
-    setSaving(true)
-    if (editPayment) {
-      await supabase.from('payments').update({
-        amount: parseInt(payAmount),
-        method: payMethod,
-        payment_date: payDate,
-        payment_time: payTime,
-        notes: payNotes || null,
-      }).eq('id', editPayment.id)
-    } else {
-      const num = `SLC-${new Date().getFullYear()}-${String(payments.length+1).padStart(4,'0')}`
-      await supabase.from('payments').insert({
-        student_username: payStudent,
-        month, payment_month: month,
-        amount: parseInt(payAmount),
-        status: 'paid', method: payMethod,
-        payment_date: payDate,
-        payment_time: payTime,
-        cheque_number: num,
-        notes: payNotes || null,
-      })
+    if (!studentU)           { setError('Select a student.'); return }
+    const amt = parseFloat(amount)
+    if (!amount || isNaN(amt) || amt < 0) { setError('Enter a valid amount.'); return }
+    setSaving(true); setError('')
+
+    const payload = {
+      student_username: studentU,
+      teacher_username: teacherU,
+      amount:           amt,
+      method,
+      payment_date:     `${payDate}T${payTime}:00`,
+      notes:            notes.trim() || null,
+      payment_month:    month,
+      payment_year:     year,
     }
-    setSaving(false)
-    onSave()
+
+    const { error: err } = isEdit
+      ? await supabase.from('payments').update(payload).eq('id', payment.id)
+      : await supabase.from('payments').insert(payload)
+
+    if (err) { setError(err.message); setSaving(false); return }
+    onSaved()
   }
 
   return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.45)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:200 }}
-      onClick={e => e.target===e.currentTarget && onClose()}>
-      <div style={{ background:'white', borderRadius:'16px', padding:'28px', width:'460px', maxHeight:'90vh', overflowY:'auto', boxShadow:'0 24px 64px rgba(0,0,0,0.18)' }}>
-        <h3 style={{ fontSize:'18px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', color:D, marginBottom:'20px' }}>
-          {editPayment ? 'Edit Payment' : 'Record Payment'}
-        </h3>
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.45)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:300, padding:'24px', fontFamily:"'DM Sans',sans-serif" }}
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{ background:'white', borderRadius:'20px', padding:'28px', width:'100%', maxWidth:'460px', boxShadow:'0 24px 64px rgba(0,0,0,0.18)', maxHeight:'90vh', overflowY:'auto' }}>
 
-        {!editPayment && <>
-          <label style={lStyle}>Teacher</label>
-          <select value={payTeacher} onChange={e => { setPayTeacher(e.target.value); setPayGroup(''); setPayStudent('') }} style={iStyle}>
-            <option value="">Select teacher...</option>
-            {teachers.map(t => <option key={t.username} value={t.username}>{t.full_name}</option>)}
-          </select>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'4px' }}>
+          <span style={{ fontSize:'18px', fontWeight:'800', color:DARK, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>
+            {isEdit ? 'Edit Payment' : 'Record Payment'}
+          </span>
+          <button onClick={onClose} style={{ width:'30px', height:'30px', borderRadius:'8px', background:'#f0f2f1', border:'none', cursor:'pointer', fontSize:'16px' }}>✕</button>
+        </div>
+        <div style={{ fontSize:'13px', color:'#94a3b8', marginBottom:'4px' }}>
+          {MONTHS[month-1]} {year}
+        </div>
 
-          {payTeacher && <>
-            <label style={lStyle}>Group</label>
-            <select value={payGroup} onChange={e => { setPayGroup(e.target.value); setPayStudent('') }} style={iStyle}>
-              <option value="">Select group...</option>
-              {['odd','even'].map(day => TIMES.map(time => {
-                const cnt = students.filter(s => s.teacher_username===payTeacher && s.day===day && s.class_time===time).length
-                if (!cnt) return null
-                return <option key={`${day}-${time}`} value={`${day}-${time}`}>{day==='odd'?'Odd':'Even'} · {time} ({cnt})</option>
-              }))}
+        {/* ── Teacher ── */}
+        <label style={lbl}>Teacher</label>
+        <select value={teacherU} onChange={e => handleTeacherChange(e.target.value)}
+          disabled={!!prefill || isEdit}
+          style={{ ...inpStyle, appearance:'none', cursor: (prefill||isEdit)?'default':'pointer', opacity:(prefill||isEdit)?0.7:1 }}>
+          <option value="">Select teacher…</option>
+          {teachers.map(t => <option key={t.username} value={t.username}>{t.full_name}</option>)}
+        </select>
+
+        {/* ── Group ── */}
+        {teacherU && (
+          <>
+            <label style={lbl}>Group</label>
+            <select value={groupKey} onChange={e => handleGroupChange(e.target.value)}
+              disabled={!!prefill || isEdit}
+              style={{ ...inpStyle, appearance:'none', cursor:(prefill||isEdit)?'default':'pointer', opacity:(prefill||isEdit)?0.7:1 }}>
+              <option value="">Select group…</option>
+              {teacherGroups.map(g => (
+                <option key={`${g.day}|${g.class_time}`} value={`${g.day}|${g.class_time}`}>
+                  {g.level} · {dayLabel(g.day)} · {g.class_time}
+                </option>
+              ))}
             </select>
-          </>}
-
-          {payGroup && <>
-            <label style={lStyle}>Student</label>
-            <select value={payStudent} onChange={e => setPayStudent(e.target.value)} style={iStyle}>
-              <option value="">Select student...</option>
-              {students.filter(s => {
-                const parts = payGroup.split(/-(?=\d)/)
-                const day = parts[0], time = parts.slice(1).join('-')
-                return s.teacher_username===payTeacher && s.day===day && s.class_time===time
-              }).map(s => <option key={s.username} value={s.username}>{s.full_name}</option>)}
-            </select>
-          </>}
-        </>}
-
-        {editPayment && (
-          <div style={{ background:`${G}08`, borderRadius:'10px', padding:'12px 14px', marginBottom:'14px', fontSize:'14px', fontWeight:'600', color:D }}>
-            Student: {students.find(s => s.username===editPayment.student_username)?.full_name || editPayment.student_username}
-          </div>
+          </>
         )}
 
-        <label style={lStyle}>Amount (UZS)</label>
+        {/* ── Student ── */}
+        {groupKey && (
+          <>
+            <label style={lbl}>Student</label>
+            <select value={studentU} onChange={e => setStudentU(e.target.value)}
+              disabled={!!prefill || isEdit}
+              style={{ ...inpStyle, appearance:'none', cursor:(prefill||isEdit)?'default':'pointer', opacity:(prefill||isEdit)?0.7:1 }}>
+              <option value="">Select student…</option>
+              {groupStudents.map(s => (
+                <option key={s.username} value={s.username}>
+                  {s.full_name}{s.status==='left'?' (left)':''}
+                </option>
+              ))}
+            </select>
+          </>
+        )}
+
+        {/* ── Amount presets ── */}
+        <label style={lbl}>Amount (UZS)</label>
         <div style={{ display:'flex', gap:'8px', marginBottom:'8px' }}>
-          {['550000','600000','650000'].map(a => (
-            <button key={a} onClick={() => setPayAmount(a)} style={{ flex:1, padding:'9px', borderRadius:'8px', border:`1.5px solid ${payAmount===a?G:'#e4e8e7'}`, background:payAmount===a?`${G}12`:'white', color:payAmount===a?G:'#64748b', fontSize:'13px', fontWeight:'600', cursor:'pointer' }}>
-              {parseInt(a).toLocaleString()}
+          {PRESET_AMOUNTS.map(p => (
+            <button key={p} onClick={() => setAmount(String(p))}
+              style={{ flex:1, padding:'9px 4px', borderRadius:'10px', border:`1.5px solid ${String(amount)===String(p)?G:'#e4e8e7'}`, background:String(amount)===String(p)?`${G}12`:'white', color:String(amount)===String(p)?G:DARK, fontSize:'13px', fontWeight:'700', cursor:'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>
+              {fmt(p)}
             </button>
           ))}
         </div>
-        <input type="number" value={payAmount} onChange={e => setPayAmount(e.target.value)} placeholder="Custom amount" style={iStyle} />
+        <input type="number" value={amount} onChange={e => setAmount(e.target.value)}
+          placeholder="Or enter custom amount…" min="0" style={inpStyle} />
 
-        <label style={lStyle}>Method</label>
-        <div style={{ display:'flex', gap:'8px', marginBottom:'12px' }}>
-          {['cash','card','online','transfer'].map(m => (
-            <button key={m} onClick={() => setPayMethod(m)} style={{ flex:1, padding:'9px', borderRadius:'8px', border:`1.5px solid ${payMethod===m?G:'#e4e8e7'}`, background:payMethod===m?`${G}12`:'white', color:payMethod===m?G:'#64748b', fontSize:'12px', fontWeight:'600', cursor:'pointer', textTransform:'capitalize' }}>{m}</button>
+        {/* ── Method ── */}
+        <label style={lbl}>Method</label>
+        <div style={{ display:'flex', gap:'8px', marginBottom:'4px' }}>
+          {METHODS.map(m => (
+            <button key={m} onClick={() => setMethod(m)}
+              style={{ flex:1, padding:'9px 4px', borderRadius:'10px', border:`1.5px solid ${method===m?G:'#e4e8e7'}`, background:method===m?G:'white', color:method===m?'white':DARK, fontSize:'13px', fontWeight:'700', cursor:'pointer' }}>
+              {m}
+            </button>
           ))}
         </div>
 
+        {/* ── Date & Time ── */}
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
-          <div>
-            <label style={lStyle}>Date</label>
-            <input type="date" value={payDate} onChange={e => setPayDate(e.target.value)} style={iStyle} />
-          </div>
-          <div>
-            <label style={lStyle}>Time</label>
-            <input type="time" value={payTime} onChange={e => setPayTime(e.target.value)} style={iStyle} />
-          </div>
+          <div><label style={lbl}>Date</label><input type="date" value={payDate} onChange={e=>setPayDate(e.target.value)} style={inpStyle}/></div>
+          <div><label style={lbl}>Time</label><input type="time" value={payTime} onChange={e=>setPayTime(e.target.value)} style={inpStyle}/></div>
         </div>
 
-        <label style={lStyle}>Notes (optional)</label>
-        <input type="text" value={payNotes} onChange={e => setPayNotes(e.target.value)} placeholder="Any additional notes..." style={iStyle} />
+        {/* ── Notes ── */}
+        <label style={lbl}>Notes (optional)</label>
+        <input value={notes} onChange={e=>setNotes(e.target.value)}
+          placeholder="Any additional notes…"
+          style={{ ...inpStyle, marginBottom: error?'10px':'0' }} />
 
-        <div style={{ display:'flex', gap:'10px', marginTop:'8px' }}>
-          <button onClick={onClose} style={{ flex:1, padding:'12px', borderRadius:'8px', border:'1.5px solid #e4e8e7', background:'white', color:'#64748b', fontSize:'14px', fontWeight:'600', cursor:'pointer' }}>Cancel</button>
-          <button onClick={save} disabled={saving || (!editPayment && !payStudent)}
-            style={{ flex:1, padding:'12px', borderRadius:'8px', border:'none', background:G, color:'white', fontSize:'14px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'700', cursor:'pointer', opacity:(!editPayment && !payStudent) ? 0.6 : 1 }}>
-            {saving ? 'Saving...' : editPayment ? 'Save changes' : 'Save payment'}
+        {error && <div style={{ color:'#ef4444', fontSize:'13px', fontWeight:'600', marginTop:'10px' }}>{error}</div>}
+
+        <div style={{ display:'flex', gap:'12px', marginTop:'20px' }}>
+          <button onClick={onClose} style={{ flex:1, padding:'13px', borderRadius:'12px', border:'1.5px solid #e4e8e7', background:'white', color:'#64748b', fontSize:'14px', fontWeight:'600', cursor:'pointer' }}>Cancel</button>
+          <button onClick={save} disabled={saving}
+            style={{ flex:2, padding:'13px', borderRadius:'12px', border:'none', background:G, color:'white', fontSize:'14px', fontWeight:'700', cursor:'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>
+            {saving ? 'Saving…' : (isEdit ? 'Save Changes' : 'Save payment')}
           </button>
         </div>
       </div>
@@ -163,216 +216,252 @@ function PaymentForm({ teachers, students, payments, month, editPayment, prefill
   )
 }
 
+// ── UNPAID MODAL ──────────────────────────────────────────────────────────────
+function UnpaidModal({ students, onRecordPayment, onClose }) {
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.45)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:200, padding:'24px', fontFamily:"'DM Sans',sans-serif" }}
+      onClick={e => e.target===e.currentTarget && onClose()}>
+      <div style={{ background:'white', borderRadius:'20px', padding:'24px', width:'100%', maxWidth:'480px', boxShadow:'0 24px 64px rgba(0,0,0,0.18)', maxHeight:'80vh', display:'flex', flexDirection:'column' }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'16px' }}>
+          <span style={{ fontSize:'17px', fontWeight:'800', color:DARK, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>
+            Unpaid Students ({students.length})
+          </span>
+          <button onClick={onClose} style={{ width:'30px', height:'30px', borderRadius:'8px', background:'#f0f2f1', border:'none', cursor:'pointer', fontSize:'16px' }}>✕</button>
+        </div>
+        <div style={{ overflowY:'auto', flex:1, display:'flex', flexDirection:'column', gap:'0' }}>
+          {students.map((s, i) => (
+            <div key={s.username} style={{ display:'flex', alignItems:'center', gap:'12px', padding:'12px 0', borderBottom: i<students.length-1?'1px solid #f0f2f1':'none' }}>
+              <div style={{ width:'36px', height:'36px', borderRadius:'50%', background:'#fde8e8', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                <span style={{ fontSize:'12px', fontWeight:'800', color:'#ef4444' }}>
+                  {s.full_name.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase()}
+                </span>
+              </div>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:'14px', fontWeight:'700', color:DARK, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{s.full_name}</div>
+                {s.phone && <div style={{ fontSize:'11px', color:'#94a3b8' }}>{s.phone}</div>}
+              </div>
+              <span style={{ fontSize:'11px', fontWeight:'700', padding:'3px 8px', borderRadius:'20px', background:s.status==='active'?`${G}15`:'#fde8e8', color:s.status==='active'?G:'#ef4444', flexShrink:0 }}>
+                {s.status==='active'?'Active':'Left'}
+              </span>
+              <button
+                onClick={() => { onClose(); onRecordPayment(s) }}
+                style={{ padding:'7px 13px', borderRadius:'9px', border:`1.5px solid ${G}`, background:'white', color:G, fontSize:'12px', fontWeight:'700', cursor:'pointer', whiteSpace:'nowrap', flexShrink:0, transition:'all 0.15s' }}
+                onMouseEnter={e=>{e.currentTarget.style.background=G;e.currentTarget.style.color='white'}}
+                onMouseLeave={e=>{e.currentTarget.style.background='white';e.currentTarget.style.color=G}}>
+                Record payment
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── MAIN ─────────────────────────────────────────────────────────────────────
 export default function PaymentsSection() {
-  const [students, setStudents]           = useState([])
-  const [teachers, setTeachers]           = useState([])
-  const [payments, setPayments]           = useState([])
-  const [loading, setLoading]             = useState(true)
-  const [month, setMonth]                 = useState(() => new Date().toISOString().slice(0,7))
-  const [showUnpaid, setShowUnpaid]       = useState(false)
-  const [unpaidTeacher, setUnpaidTeacher] = useState(null)
-  const [showForm, setShowForm]           = useState(false)
-  const [editPayment, setEditPayment]     = useState(null)
-  const [prefilledStudent, setPrefilledStudent] = useState(null)
-  const [search, setSearch]               = useState('')
+  const now = new Date()
+  const [month,       setMonth]       = useState(now.getMonth() + 1)
+  const [year,        setYear]        = useState(now.getFullYear())
+  const [payments,    setPayments]    = useState([])
+  const [allStudents, setAllStudents] = useState([])
+  const [allGroups,   setAllGroups]   = useState([])
+  const [teachers,    setTeachers]    = useState([])
+  const [loading,     setLoading]     = useState(true)
+  const [search,      setSearch]      = useState('')
+  const [modal,       setModal]       = useState(null) // null | 'new' | payment-obj
+  const [prefill,     setPrefill]     = useState(null) // student to prefill
+  const [showUnpaid,  setShowUnpaid]  = useState(false)
+  const [deleting,    setDeleting]    = useState(null)
 
-  const monthOpts = Array.from({length:8},(_,i) => {
-    const d = new Date(); d.setDate(1); d.setMonth(d.getMonth()-4+i)
-    return { val:`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`, label:d.toLocaleDateString('en-US',{month:'long',year:'numeric'}) }
-  })
-
-  useEffect(() => { fetchAll() }, [])
+  useEffect(() => { fetchAll() }, [month, year])
 
   const fetchAll = async () => {
     setLoading(true)
-    const [{ data:s }, { data:t }, { data:p }] = await Promise.all([
-      supabase.from('students').select('*').eq('status','active'),
-      supabase.from('teachers').select('*').order('full_name'),
-      supabase.from('payments').select('*,students(full_name)').order('created_at',{ascending:false}),
+    const [{ data: pays }, { data: stus }, { data: grps }, { data: tchs }] = await Promise.all([
+      supabase.from('payments').select('*')
+        .eq('payment_month', month).eq('payment_year', year)
+        .order('payment_date', { ascending: false }),
+      supabase.from('students').select('username,full_name,phone,enrolled_date,status,left_date,teacher_username,day,class_time')
+        .neq('username','test').order('full_name'),
+      supabase.from('groups').select('*').order('class_time'),
+      supabase.from('teachers').select('username,full_name').neq('username','test').order('full_name'),
     ])
-    if (s) setStudents(s)
-    if (t) setTeachers(t)
-    if (p) setPayments(p)
+    setPayments(pays || [])
+    setAllStudents(stus || [])
+    setAllGroups(grps || [])
+    setTeachers(tchs || [])
     setLoading(false)
   }
 
   const deletePayment = async (id) => {
     if (!confirm('Delete this payment record?')) return
+    setDeleting(id)
     await supabase.from('payments').delete().eq('id', id)
+    setDeleting(null)
     fetchAll()
   }
 
-  const openRecord = (student) => {
-    setPrefilledStudent(student || null)
-    setEditPayment(null)
-    setShowForm(true)
-    setShowUnpaid(false)
-    setUnpaidTeacher(null)
+  const openNew = (student = null) => {
+    setPrefill(student)
+    setModal('new')
   }
 
-  const closeForm = () => {
-    setShowForm(false)
-    setEditPayment(null)
-    setPrefilledStudent(null)
+  // Month options — 24 months back to now
+  const monthOptions = []
+  for (let i = 23; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+    monthOptions.push({ label:`${MONTHS[d.getMonth()]} ${d.getFullYear()}`, month:d.getMonth()+1, year:d.getFullYear() })
   }
 
-  const monthPays   = payments.filter(p => (p.payment_month||p.month) === month)
-  const paidSet     = new Set(monthPays.map(p => p.student_username))
-  const paidCount   = students.filter(s => paidSet.has(s.username)).length
-  const unpaidCount = students.length - paidCount
-  const collected   = monthPays.reduce((sum,p) => sum+(p.amount||0), 0)
-  const listed      = monthPays.filter(p => !search || (p.students?.full_name||p.student_username||'').toLowerCase().includes(search.toLowerCase()))
+  // Stats
+  const eligible      = allStudents.filter(s => studentInMonth(s, month, year))
+  const paidUsernames = new Set(payments.map(p => p.student_username))
+  const unpaidStudents = eligible.filter(s => !paidUsernames.has(s.username))
+  const totalCollected = payments.reduce((a,p) => a + Number(p.amount), 0)
 
-  if (loading) return <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'200px', color:'#94a3b8', fontSize:'14px' }}>Loading...</div>
+  // Filtered log
+  const filtered = payments.filter(p => {
+    if (!search.trim()) return true
+    const stu = allStudents.find(s => s.username === p.student_username)
+    return stu?.full_name?.toLowerCase().includes(search.toLowerCase())
+  })
+
+  const th = { fontSize:'11px', fontWeight:'700', color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.05em', padding:'12px 16px' }
 
   return (
-    <div>
-      {/* Controls */}
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'22px', flexWrap:'wrap', gap:'10px' }}>
-        <div style={{ display:'flex', gap:'10px', alignItems:'center', flexWrap:'wrap' }}>
-          <select value={month} onChange={e => setMonth(e.target.value)} style={{ padding:'9px 14px', borderRadius:'8px', border:'1.5px solid #e4e8e7', fontSize:'14px', color:D, outline:'none', fontWeight:'600', cursor:'pointer' }}>
-            {monthOpts.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
-          </select>
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search student..." style={{ padding:'9px 12px', borderRadius:'8px', border:'1.5px solid #e4e8e7', fontSize:'13px', outline:'none', width:'180px' }} />
+    <div style={{ padding:'32px', fontFamily:"'DM Sans',sans-serif" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap');
+        * { box-sizing: border-box }
+        select { -webkit-appearance:none; -moz-appearance:none }
+      `}</style>
+
+      {/* Top bar */}
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'24px', gap:'12px', flexWrap:'wrap' }}>
+        <h1 style={{ fontSize:'22px', fontWeight:'800', color:DARK, fontFamily:"'Plus Jakarta Sans',sans-serif", margin:0 }}>Payments</h1>
+        <div style={{ fontSize:'13px', color:'#94a3b8' }}>
+          {new Date().toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}
         </div>
-        <button onClick={() => openRecord(null)} style={{ padding:'9px 18px', borderRadius:'8px', border:'none', background:G, color:'white', fontSize:'13px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'700', cursor:'pointer' }}>
-          + Record payment
-        </button>
+      </div>
+
+      {/* Controls row */}
+      <div style={{ display:'flex', alignItems:'center', gap:'12px', marginBottom:'24px', flexWrap:'wrap' }}>
+        {/* Month dropdown */}
+        <div style={{ position:'relative' }}>
+          <select
+            value={`${month}-${year}`}
+            onChange={e => { const [m,y] = e.target.value.split('-'); setMonth(Number(m)); setYear(Number(y)) }}
+            style={{ padding:'9px 36px 9px 14px', borderRadius:'10px', border:'1.5px solid #e4e8e7', fontSize:'14px', fontWeight:'700', color:DARK, background:'white', cursor:'pointer', fontFamily:"'DM Sans',sans-serif", outline:'none' }}>
+            {monthOptions.map(o => (
+              <option key={`${o.month}-${o.year}`} value={`${o.month}-${o.year}`}>{o.label}</option>
+            ))}
+          </select>
+          <svg style={{ position:'absolute', right:'10px', top:'50%', transform:'translateY(-50%)', pointerEvents:'none' }} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={DARK} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+
+        {/* Search */}
+        <div style={{ position:'relative', flex:1, minWidth:'200px', maxWidth:'320px' }}>
+          <svg style={{ position:'absolute', left:'12px', top:'50%', transform:'translateY(-50%)' }} width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search student…"
+            style={{ width:'100%', padding:'9px 12px 9px 36px', borderRadius:'10px', border:'1.5px solid #e4e8e7', fontSize:'14px', color:DARK, outline:'none', background:'white', fontFamily:"'DM Sans',sans-serif" }} />
+        </div>
+
+        <div style={{ marginLeft:'auto' }}>
+          <button onClick={() => openNew()}
+            style={{ padding:'9px 18px', borderRadius:'10px', border:'none', background:G, color:'white', fontSize:'14px', fontWeight:'700', cursor:'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif", display:'flex', alignItems:'center', gap:'6px' }}>
+            <span style={{ fontSize:'18px', lineHeight:1 }}>+</span> Record payment
+          </button>
+        </div>
       </div>
 
       {/* Stats */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'14px', marginBottom:'22px' }}>
-        {[
-          { l:'Total Students', v:students.length, c:D, click:false },
-          { l:'Paid', v:paidCount, c:G, click:false },
-          { l:'Unpaid', v:unpaidCount, c:'#dc2626', click:true, border:'#fca5a5' },
-          { l:'Collected', v:collected.toLocaleString()+' UZS', c:D, click:false },
-        ].map((x,i) => (
-          <div key={i} onClick={() => x.click && setShowUnpaid(!showUnpaid)}
-            style={{ background:'white', borderRadius:'12px', padding:'18px', border:`1.5px solid ${x.click && unpaidCount > 0 ? x.border : '#e4e8e7'}`, cursor:x.click?'pointer':'default', transition:'all 0.15s' }}
-            onMouseEnter={e => { if (x.click) e.currentTarget.style.boxShadow='0 4px 16px rgba(220,38,38,.12)' }}
-            onMouseLeave={e => { e.currentTarget.style.boxShadow='none' }}>
-            <div style={{ fontSize:'11px', fontWeight:'700', color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:'8px' }}>{x.l}</div>
-            <div style={{ fontSize:'24px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', color:x.c }}>{x.v}</div>
-            {x.click && unpaidCount > 0 && <div style={{ fontSize:'11px', color:'#dc2626', marginTop:'4px', fontWeight:'600' }}>Click to see →</div>}
-          </div>
-        ))}
-      </div>
-
-      {/* Unpaid panel */}
-      {showUnpaid && (
-        <div style={{ background:'white', borderRadius:'12px', border:'1.5px solid #fca5a5', padding:'20px', marginBottom:'20px' }}>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'14px' }}>
-            <h3 style={{ fontSize:'15px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'700', color:D }}>
-              {unpaidTeacher ? `Unpaid — ${unpaidTeacher.full_name}` : 'Unpaid Students by Teacher'}
-            </h3>
-            <div style={{ display:'flex', gap:'6px' }}>
-              {unpaidTeacher && <button onClick={() => setUnpaidTeacher(null)} style={{ padding:'5px 12px', borderRadius:'6px', border:'1.5px solid #e4e8e7', background:'white', color:'#64748b', fontSize:'12px', fontWeight:'600', cursor:'pointer' }}>← Back</button>}
-              <button onClick={() => { setShowUnpaid(false); setUnpaidTeacher(null) }} style={{ padding:'5px 12px', borderRadius:'6px', border:'1.5px solid #e4e8e7', background:'white', color:'#64748b', fontSize:'12px', fontWeight:'600', cursor:'pointer' }}>✕</button>
-            </div>
-          </div>
-
-          {!unpaidTeacher ? (
-            <div style={{ display:'flex', flexDirection:'column', gap:'6px' }}>
-              {teachers.map(t => {
-                const unpaid = students.filter(s => s.teacher_username===t.username && !paidSet.has(s.username))
-                if (!unpaid.length) return null
-                return (
-                  <button key={t.username} onClick={() => setUnpaidTeacher(t)}
-                    style={{ padding:'12px 16px', borderRadius:'8px', border:'1.5px solid #e4e8e7', background:'#f8fafb', textAlign:'left', cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center', transition:'all 0.15s' }}
-                    onMouseEnter={e => e.currentTarget.style.borderColor=G}
-                    onMouseLeave={e => e.currentTarget.style.borderColor='#e4e8e7'}>
-                    <span style={{ fontSize:'14px', fontWeight:'600', color:D }}>{t.full_name}</span>
-                    <span style={{ fontSize:'12px', fontWeight:'700', padding:'3px 10px', borderRadius:'20px', background:'#fef2f2', color:'#dc2626' }}>{unpaid.length} unpaid</span>
-                  </button>
-                )
-              })}
-              {teachers.every(t => !students.filter(s => s.teacher_username===t.username && !paidSet.has(s.username)).length) && (
-                <div style={{ textAlign:'center', padding:'20px', color:'#94a3b8', fontSize:'13px' }}>🎉 All students paid!</div>
-              )}
-            </div>
-          ) : (
-            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'14px' }}>
-              <thead>
-                <tr style={{ borderBottom:'1px solid #f0f2f1' }}>
-                  {['Name','Day & Time',''].map(h => <th key={h} style={{ padding:'8px 12px', textAlign:'left', fontSize:'11px', fontWeight:'700', color:'#94a3b8', textTransform:'uppercase' }}>{h}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {students.filter(s => s.teacher_username===unpaidTeacher.username && !paidSet.has(s.username)).map((s,i) => (
-                  <tr key={i} style={{ borderBottom:'1px solid #f0f2f1' }}>
-                    <td style={{ padding:'10px 12px', fontWeight:'600', color:D }}>{s.full_name}</td>
-                    <td style={{ padding:'10px 12px', color:'#64748b', fontSize:'13px' }}>{s.day==='odd'?'Mon/Wed/Fri':'Tue/Thu/Sat'} · {s.class_time}</td>
-                    <td style={{ padding:'10px 12px' }}>
-                      <button onClick={() => openRecord(s)}
-                        style={{ padding:'5px 14px', borderRadius:'6px', border:'none', background:G, color:'white', fontSize:'12px', fontWeight:'600', cursor:'pointer' }}>
-                        Record
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'16px', marginBottom:'28px' }}>
+        <div style={{ background:'white', borderRadius:'14px', padding:'18px 20px', boxShadow:'0 2px 8px rgba(0,0,0,0.06)' }}>
+          <div style={{ fontSize:'11px', fontWeight:'700', color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'8px' }}>Total Students</div>
+          <div style={{ fontSize:'26px', fontWeight:'800', color:DARK, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>{loading?'…':eligible.length}</div>
         </div>
-      )}
-
-      {/* Payments table */}
-      <div style={{ background:'white', borderRadius:'12px', border:'1.5px solid #e4e8e7', overflow:'hidden' }}>
-        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'14px' }}>
-          <thead>
-            <tr style={{ background:'#f8fafb', borderBottom:'1.5px solid #e4e8e7' }}>
-              {['Receipt #','Student','Amount','Method','Date & Time','Actions'].map(h => (
-                <th key={h} style={{ padding:'11px 16px', textAlign:'left', fontSize:'11px', fontWeight:'700', color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.05em' }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {listed.map((p,i) => (
-              <tr key={i} style={{ borderBottom:i<listed.length-1?'1px solid #f0f2f1':'none' }}
-                onMouseEnter={e => e.currentTarget.style.background='#f8fafb'}
-                onMouseLeave={e => e.currentTarget.style.background='white'}>
-                <td style={{ padding:'12px 16px', fontFamily:'monospace', fontSize:'12px', color:G, fontWeight:'700' }}>{p.cheque_number||'—'}</td>
-                <td style={{ padding:'12px 16px', fontWeight:'600', color:D }}>{p.students?.full_name||p.student_username}</td>
-                <td style={{ padding:'12px 16px', fontWeight:'700', color:G }}>{p.amount?.toLocaleString()} UZS</td>
-                <td style={{ padding:'12px 16px', color:'#64748b', textTransform:'capitalize' }}>{p.method||'cash'}</td>
-                <td style={{ padding:'12px 16px', color:'#64748b', fontSize:'13px' }}>
-                  {p.payment_date||'—'}
-                  {p.payment_time && <span style={{ color:'#94a3b8', marginLeft:'6px' }}>{p.payment_time}</span>}
-                </td>
-                <td style={{ padding:'12px 16px' }}>
-                  <div style={{ display:'flex', gap:'6px' }}>
-                    <button onClick={() => { setEditPayment(p); setPrefilledStudent(null); setShowForm(true) }}
-                      style={{ padding:'5px 12px', borderRadius:'6px', border:`1.5px solid ${G}`, background:`${G}10`, color:G, fontSize:'12px', fontWeight:'600', cursor:'pointer' }}>Edit</button>
-                    {p.cheque_number && (
-                      <button onClick={() => downloadCheque(p, p.students?.full_name||p.student_username||'')}
-                        style={{ padding:'5px 12px', borderRadius:'6px', border:'1.5px solid #e4e8e7', background:'white', color:'#64748b', fontSize:'12px', fontWeight:'600', cursor:'pointer' }}>🧾</button>
-                    )}
-                    <button onClick={() => deletePayment(p.id)}
-                      style={{ padding:'5px 12px', borderRadius:'6px', border:'1.5px solid #fca5a5', background:'#fef2f2', color:'#dc2626', fontSize:'12px', fontWeight:'600', cursor:'pointer' }}>✕</button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {!listed.length && (
-              <tr><td colSpan="6" style={{ padding:'40px', textAlign:'center', color:'#94a3b8' }}>
-                No payments for {monthOpts.find(o=>o.val===month)?.label}
-              </td></tr>
-            )}
-          </tbody>
-        </table>
+        <div style={{ background:'white', borderRadius:'14px', padding:'18px 20px', boxShadow:'0 2px 8px rgba(0,0,0,0.06)' }}>
+          <div style={{ fontSize:'11px', fontWeight:'700', color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'8px' }}>Paid</div>
+          <div style={{ fontSize:'26px', fontWeight:'800', color:G, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>{loading?'…':paidUsernames.size}</div>
+        </div>
+        <div onClick={() => !loading && unpaidStudents.length > 0 && setShowUnpaid(true)}
+          style={{ background:'white', borderRadius:'14px', padding:'18px 20px', boxShadow:'0 2px 8px rgba(0,0,0,0.06)', cursor:unpaidStudents.length>0?'pointer':'default', border:unpaidStudents.length>0?'1.5px solid #fde8e8':'1.5px solid transparent', transition:'box-shadow 0.15s' }}
+          onMouseEnter={e=>{ if(unpaidStudents.length>0) e.currentTarget.style.boxShadow='0 4px 16px rgba(239,68,68,0.15)' }}
+          onMouseLeave={e=>e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.06)'}>
+          <div style={{ fontSize:'11px', fontWeight:'700', color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'8px' }}>Unpaid</div>
+          <div style={{ fontSize:'26px', fontWeight:'800', color:'#ef4444', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>{loading?'…':unpaidStudents.length}</div>
+          {!loading && unpaidStudents.length > 0 && <div style={{ fontSize:'12px', color:'#ef4444', marginTop:'4px', fontWeight:'600' }}>Click to see →</div>}
+        </div>
+        <div style={{ background:'white', borderRadius:'14px', padding:'18px 20px', boxShadow:'0 2px 8px rgba(0,0,0,0.06)' }}>
+          <div style={{ fontSize:'11px', fontWeight:'700', color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'8px' }}>Collected</div>
+          <div style={{ fontSize:'22px', fontWeight:'800', color:DARK, fontFamily:"'Plus Jakarta Sans',sans-serif", lineHeight:1.2 }}>{loading?'…':`${fmt(totalCollected)} UZS`}</div>
+        </div>
       </div>
 
-      {showForm && (
-        <PaymentForm
+      {/* Payment log */}
+      <div style={{ background:'white', borderRadius:'16px', overflow:'hidden', boxShadow:'0 2px 10px rgba(0,0,0,0.07)' }}>
+        <div style={{ display:'grid', gridTemplateColumns:'160px 1fr 150px 120px 180px 140px', background:'#f8fafb', borderBottom:'1px solid #f0f2f1' }}>
+          {['Receipt #','Student','Amount','Method','Date & Time','Actions'].map((h,i) => (
+            <div key={i} style={th}>{h}</div>
+          ))}
+        </div>
+        {loading ? (
+          <div style={{ padding:'48px', textAlign:'center', color:'#94a3b8' }}>Loading…</div>
+        ) : filtered.length === 0 ? (
+          <div style={{ padding:'48px', textAlign:'center', color:'#94a3b8' }}>
+            {search ? 'No matching payments found.' : `No payments recorded for ${MONTHS[month-1]} ${year}.`}
+          </div>
+        ) : filtered.map((p, i) => {
+          const stu = allStudents.find(s => s.username === p.student_username)
+          const receiptNo = p.receipt_number || `#${String(payments.length - i).padStart(4,'0')}`
+          return (
+            <div key={p.id} style={{ display:'grid', gridTemplateColumns:'160px 1fr 150px 120px 180px 140px', alignItems:'center', borderBottom:i<filtered.length-1?'1px solid #f0f2f1':'none', background:'white', transition:'background 0.1s' }}
+              onMouseEnter={e=>e.currentTarget.style.background='#f8fafb'}
+              onMouseLeave={e=>e.currentTarget.style.background='white'}>
+              <div style={{ padding:'14px 16px', fontSize:'13px', fontWeight:'700', color:G, fontFamily:'monospace' }}>{receiptNo}</div>
+              <div style={{ padding:'14px 16px' }}>
+                <div style={{ fontSize:'14px', fontWeight:'700', color:DARK }}>{stu?.full_name || p.student_username}</div>
+                {stu?.status==='left' && <span style={{ fontSize:'10px', fontWeight:'700', color:'#ef4444' }}>Left</span>}
+              </div>
+              <div style={{ padding:'14px 16px', fontSize:'14px', fontWeight:'800', color:Number(p.amount)>0?G:'#94a3b8', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>
+                {fmt(p.amount)} UZS
+              </div>
+              <div style={{ padding:'14px 16px', fontSize:'13px', color:'#64748b', fontWeight:'600' }}>{p.method||'—'}</div>
+              <div style={{ padding:'14px 16px', fontSize:'12px', color:'#64748b', fontFamily:'monospace' }}>{fmtDateTime(p.payment_date)}</div>
+              <div style={{ padding:'14px 16px', display:'flex', alignItems:'center', gap:'8px' }}>
+                <button onClick={() => { setPrefill(null); setModal(p) }}
+                  style={{ padding:'6px 12px', borderRadius:'8px', border:'1.5px solid #e4e8e7', background:'white', color:DARK, fontSize:'12px', fontWeight:'700', cursor:'pointer' }}>
+                  Edit
+                </button>
+                <button onClick={() => deletePayment(p.id)} disabled={deleting===p.id}
+                  style={{ width:'28px', height:'28px', borderRadius:'8px', border:'1.5px solid #fde8e8', background:'white', color:'#ef4444', fontSize:'16px', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:'800' }}>
+                  {deleting===p.id?'…':'×'}
+                </button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Modals */}
+      {modal && (
+        <PaymentModal
+          payment={modal==='new' ? null : modal}
+          prefill={modal==='new' ? prefill : null}
+          allStudents={allStudents}
+          allGroups={allGroups}
+          month={month} year={year}
           teachers={teachers}
-          students={students}
-          payments={payments}
-          month={month}
-          editPayment={editPayment}
-          prefilledStudent={prefilledStudent}
-          onSave={() => { fetchAll(); closeForm() }}
-          onClose={closeForm}
+          onClose={() => { setModal(null); setPrefill(null) }}
+          onSaved={() => { setModal(null); setPrefill(null); fetchAll() }}
+        />
+      )}
+      {showUnpaid && (
+        <UnpaidModal
+          students={unpaidStudents}
+          onRecordPayment={stu => openNew(stu)}
+          onClose={() => setShowUnpaid(false)}
         />
       )}
     </div>
