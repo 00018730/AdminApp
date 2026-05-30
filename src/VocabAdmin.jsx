@@ -64,7 +64,8 @@ function ImageSlot({ meta, preview, onFile, onRemove }) {
 
 // ── EDIT WORD MODAL ────────────────────────────────────────────────────────────
 function EditWordModal({ word, level, lessonOrder, onClose, onSaved }) {
-  const [form,       setForm]       = useState({ word: word.word, definition: word.definition||'', sentence: word.sentence||'' })
+  const [form,       setForm]       = useState({ word: word.word, definition: word.definition||'', example_sentence: word.example_sentence||'', sentence: word.sentence||'' })
+  const [genLoading, setGenLoading] = useState(false)
   const [imgFiles,   setImgFiles]   = useState([null,null,null,null])
   const [imgPrevs,   setImgPrevs]   = useState([word.picture_url||null, word.picture_url_2||null, word.picture_url_3||null, word.picture_url_4||null])
   const [imgRemoved, setImgRemoved] = useState([false,false,false,false])
@@ -91,8 +92,12 @@ function EditWordModal({ word, level, lessonOrder, onClose, onSaved }) {
     for (let i = 0; i < 4; i++) {
       if (imgRemoved[i] && !imgFiles[i]) { urls.push(null); continue }
       if (!imgFiles[i]) { urls.push(ORIG[i]); continue }
-      const ext = imgFiles[i].name.split('.').pop()
-      const path = `${level}/${lessonOrder}/${form.word.toLowerCase().replace(/\s+/g,'_')}_${suffix[i]}.${ext}`
+      const ext      = imgFiles[i].name.split('.').pop().toLowerCase()
+      const safeName = form.word.toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // strip accents: café → cafe
+        .replace(/[^a-z0-9]+/g, '_')                      // non-alphanumeric → underscore
+        .replace(/^_+|_+$/g, '')                          // trim leading/trailing underscores
+      const path = `${level}/${lessonOrder}/${safeName}_${suffix[i]}.${ext}`
       const { data: up, error: upErr } = await supabase.storage.from('vocabulary-images').upload(path, imgFiles[i], { contentType: imgFiles[i].type, upsert:true })
       if (upErr) { setError('Image upload failed: ' + upErr.message); return null }
       const { data: { publicUrl } } = supabase.storage.from('vocabulary-images').getPublicUrl(up.path)
@@ -110,13 +115,51 @@ function EditWordModal({ word, level, lessonOrder, onClose, onSaved }) {
     const urls = await uploadImages()
     if (!urls) { setSaving(false); return }
 
-    const row = { word: form.word.trim(), definition: form.definition.trim(), sentence: form.sentence.trim(), picture_url: urls[0], picture_url_2: urls[1], picture_url_3: urls[2], picture_url_4: urls[3] }
+    const row = { word: form.word.trim(), definition: form.definition.trim(), example_sentence: form.example_sentence.trim(), sentence: form.sentence.trim(), picture_url: urls[0], picture_url_2: urls[1], picture_url_3: urls[2], picture_url_4: urls[3] }
     let err
     if (word.id) { ;({ error: err } = await supabase.from('vocabulary_words').update(row).eq('id', word.id)) }
     else         { ;({ error: err } = await supabase.from('vocabulary_words').insert({ ...row, level, lesson_order: lessonOrder, word_order: word.word_order ?? 0 })) }
     setSaving(false)
     if (err) { setError(err.message); return }
     onSaved()
+  }
+
+  const handleGenerate = async () => {
+    if (!form.word.trim()) { setError('Enter the word first'); return }
+    const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY
+    if (!apiKey) { setError('Add VITE_ANTHROPIC_API_KEY to your admin .env file'); return }
+    setGenLoading(true); setError('')
+    try {
+      const userMsg = form.definition
+        ? 'Word: "' + form.word + '"\nDefinition: ' + form.definition
+        : 'Word: "' + form.word + '"'
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 80,
+          system: 'Generate one short natural example sentence (max 15 words) for an English vocabulary word. Reply with ONLY the sentence.',
+          messages: [{ role: 'user', content: userMsg }],
+        }),
+      })
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}))
+        setError(res.status === 401
+          ? 'API key invalid — add VITE_ANTHROPIC_API_KEY to your admin .env file'
+          : 'AI error: ' + (errData.error?.message || res.statusText))
+        setGenLoading(false); return
+      }
+      const data = await res.json()
+      const generated = data.content[0].text.trim().replace(/^["']|["']$/g, '')
+      setForm(f => ({ ...f, example_sentence: generated }))
+    } catch (e) { setError('AI generation failed: ' + e.message) }
+    setGenLoading(false)
   }
 
   return (
@@ -135,7 +178,19 @@ function EditWordModal({ word, level, lessonOrder, onClose, onSaved }) {
         <textarea value={form.definition} onChange={e=>setForm(f=>({...f,definition:e.target.value}))} rows={2}
           style={{ ...inp, resize:'vertical', lineHeight:1.5, marginBottom:'14px' }} />
 
-        <label style={lbl}>Sentence <span style={{ fontWeight:'400', textTransform:'none', color:'#94a3b8' }}>(use ___ for the blank)</span></label>
+        <label style={lbl}>Example Sentence <span style={{ fontWeight:'400', textTransform:'none', color:'#94a3b8' }}>(complete sentence shown on definition card)</span></label>
+        <input value={form.example_sentence} onChange={e=>setForm(f=>({...f,example_sentence:e.target.value}))}
+          placeholder="e.g. The firefighter was very brave."
+          style={{ ...inp, marginBottom:'6px' }} />
+        <button
+          type="button"
+          onClick={handleGenerate}
+          disabled={genLoading}
+          style={{ marginBottom:'14px', padding:'8px 16px', borderRadius:'8px', border:'none', background: genLoading ? '#94a3b8' : G, color:'white', fontSize:'13px', fontWeight:'700', cursor: genLoading ? 'default' : 'pointer', display:'inline-block' }}>
+          {genLoading ? 'Generating…' : '✨ Generate with AI'}
+        </button>
+
+        <label style={lbl}>Sentence <span style={{ fontWeight:'400', textTransform:'none', color:'#94a3b8' }}>(use ___ for the blank — shown in spelling step)</span></label>
         <input value={form.sentence} onChange={e=>setForm(f=>({...f,sentence:e.target.value}))} style={{ ...inp, marginBottom:'20px' }} />
 
         {/* Quiz images */}

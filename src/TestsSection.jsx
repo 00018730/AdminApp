@@ -3,12 +3,57 @@ import { supabase } from './supabase'
 
 const G = '#009472'
 const D = '#002b2a'
-const TIMES = ['9:30','14:30','16:30','18:30']
 
 const iStyle = { width:'100%', padding:'9px 12px', borderRadius:'8px', border:'1.5px solid #e4e8e7', fontSize:'14px', outline:'none', color:D, fontFamily:"'DM Sans',sans-serif", marginBottom:'12px', boxSizing:'border-box', background:'white' }
 const lStyle = { fontSize:'11px', fontWeight:'700', color:'#64748b', textTransform:'uppercase', letterSpacing:'0.06em', display:'block', marginBottom:'5px' }
 
 const LEVEL_COLORS = { 'Beginner':'#f5a623', 'Elementary':'#3b82f6', 'Pre-Intermediate':G, 'Intermediate':'#059669', 'Upper-Intermediate':'#8b5cf6' }
+
+function dayLabel(day) {
+  return day === 'odd' ? 'Mon / Wed / Fri' : 'Tue / Thu / Sat'
+}
+
+function TrialCard({ student, presentCount, onGraduate, onDelete }) {
+  const pct  = Math.min(presentCount / 3, 1)
+  const done = presentCount >= 3
+  const color = done ? G : presentCount >= 2 ? '#f59e0b' : '#94a3b8'
+  return (
+    <div style={{ background:'white', border:`1.5px solid ${done?'#d1fae5':'#e4e8e7'}`, borderRadius:'14px', padding:'16px 18px', display:'flex', alignItems:'center', gap:'14px' }}>
+      <div style={{ width:'46px', height:'46px', borderRadius:'12px', background:`${color}18`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'15px', fontWeight:'800', color, fontFamily:"'Plus Jakarta Sans',sans-serif", flexShrink:0 }}>
+        {student.full_name.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase()}
+      </div>
+      <div style={{ flex:1, minWidth:0 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'4px', flexWrap:'wrap' }}>
+          <span style={{ fontSize:'15px', fontWeight:'700', color:D }}>{student.full_name}</span>
+          <span style={{ fontSize:'11px', fontWeight:'700', padding:'2px 8px', borderRadius:'20px', background:'#fef3cd', color:'#92400e' }}>Trial</span>
+          {done && <span style={{ fontSize:'11px', fontWeight:'700', padding:'2px 8px', borderRadius:'20px', background:'#d1fae5', color:'#065f46' }}>✓ Ready to graduate</span>}
+        </div>
+        <div style={{ fontSize:'12px', color:'#94a3b8', marginBottom:'8px' }}>
+          {student.teacher_full_name || student.teacher_username} · {dayLabel(student.day)} · {student.class_time}
+        </div>
+        <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
+          <div style={{ flex:1, height:'6px', background:'#f0f2f1', borderRadius:'6px', overflow:'hidden' }}>
+            <div style={{ height:'100%', width:`${pct*100}%`, background:color, borderRadius:'6px', transition:'width 0.5s ease' }} />
+          </div>
+          <span style={{ fontSize:'13px', fontWeight:'800', color, minWidth:'28px' }}>{presentCount}/3</span>
+          <span style={{ fontSize:'11px', color:'#94a3b8' }}>lessons present</span>
+        </div>
+      </div>
+      <div style={{ display:'flex', gap:'8px', flexShrink:0 }}>
+        {done && (
+          <button onClick={onGraduate}
+            style={{ padding:'7px 14px', borderRadius:'8px', border:'none', background:G, color:'white', fontSize:'12px', fontWeight:'700', cursor:'pointer' }}>
+            ✓ Graduate
+          </button>
+        )}
+        <button onClick={onDelete}
+          style={{ padding:'7px 10px', borderRadius:'8px', border:'1.5px solid #fca5a5', background:'#fef2f2', color:'#dc2626', fontSize:'14px', cursor:'pointer' }}>
+          🗑
+        </button>
+      </div>
+    </div>
+  )
+}
 
 function TestCard({ test, onAdd, onDelete }) {
   const [open, setOpen] = useState(false)
@@ -97,18 +142,80 @@ export default function TestsSection() {
   const [form, setForm]         = useState({ teacher_username:'', day:'', class_time:'' })
   const [saving, setSaving]     = useState(false)
   const [filter, setFilter]     = useState('all')
+  const [groups, setGroups]       = useState([])
+  const [trialStudents, setTrialStudents] = useState([])
+  const [trialProgress, setTrialProgress] = useState({})
 
   useEffect(() => { fetchAll() }, [])
 
   const fetchAll = async () => {
     setLoading(true)
-    const [{ data:ts }, { data:te }] = await Promise.all([
+    const [{ data:ts }, { data:te }, { data:gr }] = await Promise.all([
       supabase.from('placement_results').select('*').order('created_at',{ascending:false}),
       supabase.from('teachers').select('*').order('full_name'),
+      supabase.from('groups').select('*'),
     ])
     if (ts) setTests(ts)
     if (te) setTeachers(te)
+    if (gr) setGroups(gr)
+
+    // Fetch trial students
+    const { data: trialStus } = await supabase.from('students')
+      .select('username,full_name,teacher_username,day,class_time,enrolled_date')
+      .eq('is_trial', true).neq('username','test').order('full_name')
+
+    if (trialStus?.length) {
+      const tMap = {}
+      ;(te||[]).forEach(t => { tMap[t.username] = t.full_name })
+      const enriched = trialStus.map(s => ({ ...s, teacher_full_name: tMap[s.teacher_username] }))
+
+      // Fetch lessons and present attendance to calculate progress
+      const { data: lessons } = await supabase.from('lessons').select('id,teacher_username,day,class_time,lesson_date')
+      const lessonMap = {}
+      ;(lessons||[]).forEach(l => { lessonMap[l.id] = l })
+
+      const { data: att } = await supabase.from('attendance')
+        .select('lesson_id,student_username')
+        .in('student_username', trialStus.map(s=>s.username))
+        .eq('status','present')
+
+      const progress = {}
+      trialStus.forEach(s => {
+        const enrolled = s.enrolled_date ? new Date(s.enrolled_date+'T00:00:00') : new Date(0)
+        progress[s.username] = (att||[]).filter(a => {
+          if (a.student_username !== s.username) return false
+          const l = lessonMap[a.lesson_id]
+          return l && l.teacher_username===s.teacher_username && l.day===s.day
+            && l.class_time===s.class_time && new Date(l.lesson_date+'T00:00:00') >= enrolled
+        }).length
+        // Auto-graduate silently if >= 3
+        if (progress[s.username] >= 3)
+          supabase.from('students').update({ is_trial:false }).eq('username',s.username)
+      })
+      setTrialStudents(enriched)
+      setTrialProgress(progress)
+    } else {
+      setTrialStudents([]); setTrialProgress({})
+    }
     setLoading(false)
+  }
+
+  const graduateStudent = async (username) => {
+    await supabase.from('students').update({ is_trial:false }).eq('username', username)
+    fetchAll()
+  }
+
+  const deleteTrialStudent = async (username, fullName) => {
+    if (!confirm(`Permanently delete ${fullName} and all their data?`)) return
+    await Promise.all([
+      supabase.from('attendance').delete().eq('student_username', username),
+      supabase.from('homework_submissions').delete().eq('student_username', username),
+      supabase.from('vocabulary_progress').delete().eq('student_username', username),
+      supabase.from('word_of_day_history').delete().eq('student_username', username),
+      supabase.from('payments').delete().eq('student_username', username),
+    ])
+    await supabase.from('students').delete().eq('username', username)
+    fetchAll()
   }
 
   const deleteTest = async (id) => {
@@ -128,7 +235,7 @@ export default function TestsSection() {
     const { error } = await supabase.from('students').insert({
       username, password, full_name:test.full_name, phone:test.phone,
       teacher_username:form.teacher_username, day:form.day, class_time:form.class_time,
-      status:'active', enrolled_date:new Date().toISOString().slice(0,10),
+      status:'active', enrolled_date:new Date().toISOString().slice(0,10), is_trial:true,
     })
     if (error) { alert('Error: '+error.message); setSaving(false); return }
 
@@ -151,6 +258,7 @@ export default function TestsSection() {
 
   const pendingCount = tests.filter(t => t.status !== 'added').length
   const addedCount   = tests.filter(t => t.status === 'added').length
+  const trialCount   = trialStudents.length
 
   if (loading) return <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'200px', color:'#94a3b8', fontSize:'14px' }}>Loading...</div>
 
@@ -159,7 +267,7 @@ export default function TestsSection() {
       {/* Filter bar */}
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'20px', flexWrap:'wrap', gap:'10px' }}>
         <div style={{ display:'flex', gap:'6px' }}>
-          {[['all','All',tests.length,'#e4e8e7',D],['pending','Pending',pendingCount,'#fca5a5','#dc2626'],['added','Added',addedCount,'#6ee7b7','#065f46']].map(([val,label,count,border,textColor]) => (
+          {[['all','All',tests.length,'#e4e8e7',D],['pending','Pending',pendingCount,'#fca5a5','#dc2626'],['added','Added',addedCount,'#6ee7b7','#065f46'],['trial','Trial',trialCount,'#fde68a','#92400e']].map(([val,label,count,border,textColor]) => (
             <button key={val} onClick={() => setFilter(val)}
               style={{ padding:'6px 16px', borderRadius:'20px', border:`1.5px solid ${filter===val?border:'#e4e8e7'}`, background:filter===val?`${border}30`:'white', color:filter===val?textColor:'#64748b', fontSize:'12px', fontWeight:'700', cursor:'pointer', transition:'all 0.15s' }}>
               {label} <span style={{ fontFamily:'monospace', fontSize:'11px' }}>({count})</span>
@@ -169,8 +277,32 @@ export default function TestsSection() {
         <div style={{ fontSize:'13px', color:'#94a3b8' }}>{pendingCount} awaiting placement</div>
       </div>
 
-      {/* List */}
-      {!filtered.length ? (
+      {/* Trial Students */}
+      {filter === 'trial' && (
+        <div style={{ display:'flex', flexDirection:'column', gap:'10px' }}>
+          {trialStudents.length === 0 ? (
+            <div style={{ textAlign:'center', padding:'60px', background:'white', borderRadius:'14px', border:'1.5px solid #e4e8e7' }}>
+              <div style={{ fontSize:'48px', marginBottom:'12px' }}>🎓</div>
+              <div style={{ fontSize:'16px', fontWeight:'700', color:D, marginBottom:'6px' }}>No trial students</div>
+              <div style={{ fontSize:'13px', color:'#94a3b8' }}>Students added via placement tests appear here for their first 3 lessons</div>
+            </div>
+          ) : (
+            <>
+              <div style={{ background:'#fffbeb', border:'1.5px solid #fde68a', borderRadius:'10px', padding:'10px 14px', fontSize:'13px', color:'#92400e', fontWeight:'600' }}>
+                💡 Students graduate automatically after attending 3 lessons. You can also graduate or delete them manually.
+              </div>
+              {trialStudents.map(s => (
+                <TrialCard key={s.username} student={s} presentCount={trialProgress[s.username]||0}
+                  onGraduate={() => graduateStudent(s.username)}
+                  onDelete={() => deleteTrialStudent(s.username, s.full_name)} />
+              ))}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Placement Test List */}
+      {filter !== 'trial' && (!filtered.length ? (
         <div style={{ textAlign:'center', padding:'60px', background:'white', borderRadius:'14px', border:'1.5px solid #e4e8e7' }}>
           <div style={{ fontSize:'48px', marginBottom:'12px' }}>📝</div>
           <div style={{ fontSize:'16px', fontWeight:'700', color:D, marginBottom:'6px' }}>No tests yet</div>
@@ -182,7 +314,7 @@ export default function TestsSection() {
             <TestCard key={t.id} test={t} onAdd={() => setAddingTo(t)} onDelete={() => deleteTest(t.id)} />
           ))}
         </div>
-      )}
+      ))}
 
       {/* Add to class modal */}
       {addingTo && (
@@ -211,16 +343,24 @@ export default function TestsSection() {
             </select>
 
             <label style={lStyle}>Day</label>
-            <select value={form.day} onChange={e => setForm(p=>({...p,day:e.target.value}))} style={iStyle}>
+            <select value={form.day} onChange={e => setForm(p=>({...p,day:e.target.value,class_time:''}))} style={iStyle}>
               <option value="">Select day...</option>
               <option value="odd">Odd (Mon · Wed · Fri)</option>
               <option value="even">Even (Tue · Thu · Sat)</option>
             </select>
 
             <label style={lStyle}>Class Time</label>
-            <select value={form.class_time} onChange={e => setForm(p=>({...p,class_time:e.target.value}))} style={iStyle}>
-              <option value="">Select time...</option>
-              {TIMES.map(t => <option key={t} value={t}>{t}</option>)}
+            <select value={form.class_time} onChange={e => setForm(p=>({...p,class_time:e.target.value}))}
+              style={{ ...iStyle, color: !form.teacher_username||!form.day?'#94a3b8':D }}
+              disabled={!form.teacher_username || !form.day}>
+              <option value="">
+                {!form.teacher_username||!form.day ? 'Select teacher & day first...' : 'Select time...'}
+              </option>
+              {groups
+                .filter(g => g.teacher_username===form.teacher_username && g.day===form.day)
+                .sort((a,b)=>a.class_time.localeCompare(b.class_time))
+                .map(g => <option key={g.class_time} value={g.class_time}>{g.class_time}</option>)
+              }
             </select>
 
             {form.teacher_username && form.day && form.class_time && (

@@ -81,7 +81,7 @@ function CreateGroupModal({ teacher, day, slot, onClose, onCreated }) {
 }
 
 // ── TEACHER GROUPS GRID ───────────────────────────────────────────────────────
-function TeacherGrid({ teacher, groups, studentCounts, onCreateSlot }) {
+function TeacherGrid({ teacher, groups, studentCounts, onCreateSlot, onSelectGroup, selectedGroup }) {
   // Map: `${day}_${class_time}` → group
   const groupMap = {}
   for (const g of groups) groupMap[`${g.day}_${g.class_time}`] = g
@@ -125,7 +125,10 @@ function TeacherGrid({ teacher, groups, studentCounts, onCreateSlot }) {
             const count = group ? (studentCounts[`${group.teacher_username}_${group.day}_${group.class_time}`] || 0) : 0
 
             if (group) return (
-              <div key={day} style={{ background: levelColors[group.level] || '#f8fafb', borderRadius:'10px', padding:'10px 12px', border:'1px solid rgba(0,0,0,0.06)' }}>
+              <div key={day} onClick={() => onSelectGroup(group)}
+                style={{ background: levelColors[group.level] || '#f8fafb', borderRadius:'10px', padding:'10px 12px', border:`1.5px solid ${selectedGroup?.id === group.id ? D : 'rgba(0,0,0,0.06)'}`, cursor:'pointer', transition:'all 0.15s', boxShadow: selectedGroup?.id === group.id ? `0 0 0 2px ${D}` : 'none' }}
+                onMouseEnter={e => e.currentTarget.style.opacity='0.85'}
+                onMouseLeave={e => e.currentTarget.style.opacity='1'}>
                 <div style={{ fontSize:'11px', fontWeight:'800', color:D }}>{group.level}</div>
                 <div style={{ fontSize:'11px', color:'#64748b', marginTop:'2px' }}>{count} student{count!==1?'s':''}</div>
               </div>
@@ -153,7 +156,9 @@ export default function GroupsSection() {
   const [groups,        setGroups]        = useState([])
   const [studentCounts, setStudentCounts] = useState({})
   const [loading,       setLoading]       = useState(true)
-  const [creating,      setCreating]      = useState(null) // { teacher, day, slot }
+  const [creating,      setCreating]      = useState(null)
+  const [selectedGroup, setSelectedGroup] = useState(null) // group object | null
+  const [deleting,      setDeleting]      = useState(false)
 
   useEffect(() => { fetchAll() }, [])
 
@@ -164,25 +169,36 @@ export default function GroupsSection() {
       supabase.from('groups').select('*'),
       supabase.from('students').select('teacher_username, day, class_time'),
     ])
-
-    // Count students per group
     const counts = {}
     for (const s of students || []) {
       const key = `${s.teacher_username}_${s.day}_${s.class_time}`
       counts[key] = (counts[key] || 0) + 1
     }
-
     setTeachers(teachers || [])
     setGroups(groups || [])
     setStudentCounts(counts)
     setLoading(false)
   }
 
+  const deleteGroup = async () => {
+    if (!selectedGroup) return
+    setDeleting(true)
+    // Remove group record — students keep their records but lose group association
+    await supabase.from('groups').delete().eq('id', selectedGroup.id)
+    setDeleting(false)
+    setSelectedGroup(null)
+    fetchAll()
+  }
+
+  const teacherName = selectedGroup
+    ? (teachers.find(t => t.username === selectedGroup.teacher_username)?.full_name || selectedGroup.teacher_username)
+    : ''
+
   return (
     <div style={{ fontFamily:"'DM Sans',sans-serif" }}>
       <div style={{ marginBottom:'24px' }}>
         <h2 style={{ fontSize:'20px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', color:D, marginBottom:'4px' }}>Groups</h2>
-        <p style={{ fontSize:'13px', color:'#94a3b8' }}>View all teacher groups and create new ones in empty time slots.</p>
+        <p style={{ fontSize:'13px', color:'#94a3b8' }}>Click a group to add students or delete it.</p>
       </div>
 
       {loading ? (
@@ -191,7 +207,11 @@ export default function GroupsSection() {
         const teacherGroups = groups.filter(g => g.teacher_username === teacher.username)
         return (
           <TeacherGrid key={teacher.username} teacher={teacher} groups={teacherGroups}
-            studentCounts={studentCounts} onCreateSlot={(t, d, s) => setCreating({ teacher: t, day: d, slot: s })} />
+            studentCounts={studentCounts}
+            onCreateSlot={(t, d, s) => setCreating({ teacher: t, day: d, slot: s })}
+            onSelectGroup={setSelectedGroup}
+            selectedGroup={selectedGroup}
+          />
         )
       })}
 
@@ -201,6 +221,56 @@ export default function GroupsSection() {
           onClose={() => setCreating(null)}
           onCreated={() => { setCreating(null); fetchAll() }}
         />
+      )}
+
+      {/* Group action panel */}
+      {selectedGroup && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.45)', display:'flex', alignItems:'flex-end', justifyContent:'center', zIndex:200 }}
+          onClick={e => e.target===e.currentTarget && setSelectedGroup(null)}>
+          <div style={{ background:'white', borderRadius:'24px 24px 0 0', padding:'24px', width:'100%', maxWidth:'480px', fontFamily:"'DM Sans',sans-serif" }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'6px' }}>
+              <h3 style={{ fontSize:'18px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', color:D }}>
+                {selectedGroup.level || 'Group'}
+              </h3>
+              <button onClick={() => setSelectedGroup(null)} style={{ width:'32px', height:'32px', borderRadius:'8px', background:'#f0f2f1', border:'none', cursor:'pointer', fontSize:'16px' }}>✕</button>
+            </div>
+            <p style={{ fontSize:'13px', color:'#94a3b8', marginBottom:'24px' }}>
+              {teacherName} · {selectedGroup.day === 'odd' ? 'Mon/Wed/Fri' : 'Tue/Thu/Sat'} · {selectedGroup.class_time}
+              {' · '}{studentCounts[`${selectedGroup.teacher_username}_${selectedGroup.day}_${selectedGroup.class_time}`] || 0} students
+            </p>
+
+            <div style={{ display:'flex', flexDirection:'column', gap:'10px' }}>
+              {/* Add student — navigates to Students section filtered to this group */}
+              <a href={`/admin?section=students&teacher=${selectedGroup.teacher_username}&day=${selectedGroup.day}&time=${selectedGroup.class_time}`}
+                style={{ display:'flex', alignItems:'center', gap:'14px', padding:'16px', borderRadius:'14px', border:`1.5px solid ${G}`, background:`${G}08`, textDecoration:'none', cursor:'pointer' }}>
+                <div style={{ width:'40px', height:'40px', borderRadius:'12px', background:`${G}20`, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={G} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
+                </div>
+                <div>
+                  <div style={{ fontSize:'15px', fontWeight:'700', color:G, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>Add a Student</div>
+                  <div style={{ fontSize:'12px', color:'#94a3b8', marginTop:'2px' }}>Enrol a new student into this group</div>
+                </div>
+              </a>
+
+              {/* Delete group */}
+              <button onClick={() => {
+                if (!window.confirm(`Delete the ${selectedGroup.level} group (${selectedGroup.class_time}, ${selectedGroup.day === 'odd' ? 'Mon/Wed/Fri' : 'Tue/Thu/Sat'})?\n\nStudents won't be deleted but will no longer be linked to this group.`)) return
+                deleteGroup()
+              }} disabled={deleting}
+                style={{ display:'flex', alignItems:'center', gap:'14px', padding:'16px', borderRadius:'14px', border:'1.5px solid #fde8e8', background:'#fff5f5', cursor:'pointer', width:'100%' }}>
+                <div style={{ width:'40px', height:'40px', borderRadius:'12px', background:'#fde8e8', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                </div>
+                <div style={{ textAlign:'left' }}>
+                  <div style={{ fontSize:'15px', fontWeight:'700', color:'#ef4444', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>
+                    {deleting ? 'Deleting…' : 'Delete Group'}
+                  </div>
+                  <div style={{ fontSize:'12px', color:'#94a3b8', marginTop:'2px' }}>Students are kept — only the group slot is removed</div>
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

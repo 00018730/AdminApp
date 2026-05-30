@@ -89,12 +89,18 @@ function PaymentModal({ payment, prefill, allStudents, allGroups, month, year, t
     if (!amount || isNaN(amt) || amt < 0) { setError('Enter a valid amount.'); return }
     setSaving(true); setError('')
 
+    // Build a proper local datetime to avoid UTC offset issues
+    // Parse the date and time as local (not UTC) so Tashkent time is preserved
+    const [yyyy, mm, dd] = payDate.split('-').map(Number)
+    const [hh, mi]       = payTime.split(':').map(Number)
+    const localDt        = new Date(yyyy, mm - 1, dd, hh, mi, 0)
+
     const payload = {
       student_username: studentU,
       teacher_username: teacherU,
       amount:           amt,
       method,
-      payment_date:     `${payDate}T${payTime}:00`,
+      payment_date:     localDt.toISOString(),
       notes:            notes.trim() || null,
       payment_month:    month,
       payment_year:     year,
