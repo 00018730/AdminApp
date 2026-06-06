@@ -10,6 +10,7 @@ import VocabAdmin from './VocabAdmin'
 import RequestsSection from './RequestsSection'
 import EssayImageAdmin from './EssayImageAdmin'
 import GroupsSection from './GroupsSection'
+import ProgressTestAdmin from './ProgressTestAdmin'
 
 const G = '#009472'
 const D = '#002b2a'
@@ -17,6 +18,7 @@ const D = '#002b2a'
 const CREDENTIALS = {
   admin:     { password: 'admin123',  role: 'admin' },
   education: { password: 'edu123',    role: 'education' },
+  manager:   { password: 'manager123', role: 'manager' },
 }
 
 // ── LOGIN ──────────────────────────────────────────────────────────────────
@@ -43,7 +45,6 @@ function Login({ onLogin }) {
 
   return (
     <div style={{ minHeight:'100vh', width:'100%', display:'flex', fontFamily:"'DM Sans',sans-serif", background:`linear-gradient(135deg, ${D} 0%, #003d3a 50%, ${G} 100%)` }}>
-      {/* Left decorative panel */}
       <div style={{ flex:1, display:'flex', flexDirection:'column', justifyContent:'center', padding:'60px' }}>
         <div style={{ color:'white' }}>
           <div style={{ display:'flex', alignItems:'center', gap:'14px', marginBottom:'48px' }}>
@@ -66,165 +67,37 @@ function Login({ onLogin }) {
           </div>
         </div>
       </div>
-
-      {/* Right login panel */}
       <div style={{ width:'480px', flexShrink:0, background:'white', display:'flex', alignItems:'center', justifyContent:'center', padding:'48px 40px', boxShadow:'-20px 0 60px rgba(0,0,0,0.2)' }}>
         <div style={{ width:'100%' }}>
           <h2 style={{ fontSize:'26px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', color:D, letterSpacing:'-0.3px', marginBottom:'6px' }}>Welcome back</h2>
           <p style={{ fontSize:'14px', color:'#94a3b8', marginBottom:'32px' }}>Sign in to continue</p>
-
           <label style={{ fontSize:'11px', fontWeight:'700', color:'#64748b', textTransform:'uppercase', letterSpacing:'0.06em', display:'block', marginBottom:'6px' }}>Username</label>
           <input value={username} onChange={e => { setUsername(e.target.value); setError('') }} onKeyDown={e => e.key==='Enter' && handle()} placeholder="Enter username"
             style={{ width:'100%', padding:'13px 16px', borderRadius:'10px', border:`1.5px solid ${error?'#fca5a5':'#e4e8e7'}`, fontSize:'15px', outline:'none', color:D, marginBottom:'14px', boxSizing:'border-box', fontFamily:"'DM Sans',sans-serif" }} />
-
           <label style={{ fontSize:'11px', fontWeight:'700', color:'#64748b', textTransform:'uppercase', letterSpacing:'0.06em', display:'block', marginBottom:'6px' }}>Password</label>
           <div style={{ position:'relative', marginBottom:'6px' }}>
             <input type={showPw?'text':'password'} value={password} onChange={e => { setPassword(e.target.value); setError('') }} onKeyDown={e => e.key==='Enter' && handle()} placeholder="Enter password"
               style={{ width:'100%', padding:'13px 44px 13px 16px', borderRadius:'10px', border:`1.5px solid ${error?'#fca5a5':'#e4e8e7'}`, fontSize:'15px', outline:'none', color:D, boxSizing:'border-box', fontFamily:"'DM Sans',sans-serif" }} />
             <button onClick={() => setShowPw(!showPw)} style={{ position:'absolute', right:'12px', top:'50%', transform:'translateY(-50%)', background:'white', border:'none', cursor:'pointer', fontSize:'18px', lineHeight:1 }}>{showPw?'🙈':'👁'}</button>
           </div>
-
           {error && <p style={{ fontSize:'13px', color:'#dc2626', marginBottom:'14px', fontWeight:'500' }}>⚠️ {error}</p>}
-
           <button onClick={handle} disabled={loading}
             style={{ width:'100%', padding:'14px', borderRadius:'10px', border:'none', background:`linear-gradient(135deg,${D},${G})`, color:'white', fontSize:'15px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'700', cursor:'pointer', marginTop:'8px', transition:'opacity 0.2s', opacity:loading?.7:1 }}>
             {loading ? 'Signing in...' : 'Sign in →'}
           </button>
-
           <p style={{ textAlign:'center', fontSize:'12px', color:'#94a3b8', marginTop:'24px' }}>Smart Learning Center · Admin Panel v1.0</p>
         </div>
       </div>
-
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap');`}</style>
     </div>
   )
 }
 
-// ── NAV CONFIG ─────────────────────────────────────────────────────────────
-const NAV = [
-  { id:'students', label:'Students', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> },
-  { id:'payments', label:'Payments', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg> },
-  { id:'tests',    label:'Placement Tests', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg> },
-  { id:'parents',  label:'Parents', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> },
-  { id:'teachers', label:'Teachers', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> },
-  { id:'groups',   label:'Groups',   icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg> },
-  { id:'announcements', label:'Announcements', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> },
-  { id:'holidays', label:'Holidays', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/></svg> },
-  { id:'requests', label:'Requests',  icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="12" y2="17"/></svg> },
-]
-
-const TITLES = {
-  students:'Students', payments:'Payments', tests:'Placement Tests',
-  parents:'Parents', teachers:'Teachers', groups:'Groups', announcements:'Announcements',
-  holidays:'Holidays', requests:'Requests',
-}
-
-// ── EDUCATION DEPARTMENT SHELL ─────────────────────────────────────────────
-const EDU_NAV = [
-  { id:'vocab', label:'Vocabulary Recap', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg> },
-  { id:'hw',    label:'Essay Images',     icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg> },
-]
-
-function EducationApp({ onLogout }) {
-  const [section, setSection]       = useState('vocab')
+// ── SIDEBAR BUILDER ────────────────────────────────────────────────────────
+function Sidebar({ nav, section, setSection, brand, role, onLogout }) {
   const [showLogout, setShowLogout] = useState(false)
-
   return (
-    <div style={{ display:'flex', minHeight:'100vh', background:'#f0f2f1', fontFamily:"'DM Sans',sans-serif" }}>
-      {/* Sidebar */}
-      <aside style={{ width:'230px', flexShrink:0, background:D, display:'flex', flexDirection:'column', position:'sticky', top:0, height:'100vh' }}>
-        <div style={{ padding:'22px 18px 18px', borderBottom:'1px solid rgba(255,255,255,0.07)' }}>
-          <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
-            <div style={{ width:'36px', height:'36px', borderRadius:'10px', background:`${G}30`, border:`1px solid ${G}50`, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={G} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
-            </div>
-            <div>
-              <div style={{ fontSize:'13px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', color:'white', letterSpacing:'-0.2px', lineHeight:'1.2' }}>Smart LC</div>
-              <div style={{ fontSize:'10px', color:G, fontWeight:'600', marginTop:'2px' }}>Education Dept</div>
-            </div>
-          </div>
-        </div>
-
-        <nav style={{ flex:1, padding:'14px 10px' }}>
-          <p style={{ fontSize:'10px', fontWeight:'700', color:'rgba(255,255,255,0.25)', textTransform:'uppercase', letterSpacing:'0.09em', padding:'0 8px', marginBottom:'8px' }}>Tasks</p>
-          {EDU_NAV.map(item => {
-            const active = section === item.id
-            return (
-              <button key={item.id} onClick={() => setSection(item.id)}
-                style={{ width:'100%', padding:'10px 12px', borderRadius:'8px', border:'none', background: active ? `${G}22` : 'transparent', color: active ? G : 'rgba(255,255,255,0.45)', fontSize:'13px', fontWeight: active ? '700' : '500', cursor:'pointer', textAlign:'left', display:'flex', alignItems:'center', gap:'10px', marginBottom:'2px', transition:'all 0.15s', fontFamily:"'DM Sans',sans-serif" }}>
-                <span style={{ opacity: active ? 1 : 0.7, flexShrink:0 }}>{item.icon}</span>
-                {item.label}
-                {active && <div style={{ width:'4px', height:'4px', borderRadius:'50%', background:G, marginLeft:'auto', flexShrink:0 }} />}
-              </button>
-            )
-          })}
-        </nav>
-
-        <div style={{ padding:'14px 10px', borderTop:'1px solid rgba(255,255,255,0.07)' }}>
-          <div style={{ padding:'10px 12px', marginBottom:'6px' }}>
-            <div style={{ fontSize:'12px', fontWeight:'700', color:'rgba(255,255,255,0.6)' }}>Education Department</div>
-            <div style={{ fontSize:'11px', color:'rgba(255,255,255,0.3)', marginTop:'1px' }}>education</div>
-          </div>
-          <button onClick={() => setShowLogout(true)}
-            style={{ width:'100%', padding:'10px 12px', borderRadius:'8px', border:'1px solid rgba(255,255,255,0.1)', background:'transparent', color:'rgba(255,255,255,0.35)', fontSize:'13px', fontWeight:'500', cursor:'pointer', textAlign:'left', fontFamily:"'DM Sans',sans-serif", display:'flex', alignItems:'center', gap:'8px', transition:'all 0.15s' }}
-            onMouseEnter={e => { e.currentTarget.style.color='#ef4444'; e.currentTarget.style.borderColor='rgba(239,68,68,0.3)' }}
-            onMouseLeave={e => { e.currentTarget.style.color='rgba(255,255,255,0.35)'; e.currentTarget.style.borderColor='rgba(255,255,255,0.1)' }}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-            Sign out
-          </button>
-        </div>
-      </aside>
-
-      {/* Main */}
-      <div style={{ flex:1, display:'flex', flexDirection:'column', minWidth:0 }}>
-        <header style={{ background:'white', borderBottom:'1px solid #e4e8e7', padding:'0 32px', height:'58px', display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
-          <h1 style={{ fontSize:'20px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', color:D, letterSpacing:'-0.3px' }}>Vocabulary Recap</h1>
-          <div style={{ fontSize:'13px', color:'#94a3b8' }}>
-            {new Date().toLocaleDateString('en-US',{ weekday:'long', month:'long', day:'numeric', year:'numeric' })}
-          </div>
-        </header>
-        <main style={{ flex:1, overflowY:'auto' }}>
-          {section === 'vocab' && <VocabAdmin />}
-          {section === 'hw'    && <EssayImageAdmin />}
-        </main>
-      </div>
-
-      {showLogout && (
-        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.45)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:300 }}>
-          <div style={{ background:'white', borderRadius:'16px', padding:'32px', width:'320px', textAlign:'center', boxShadow:'0 20px 60px rgba(0,0,0,0.2)' }}>
-            <div style={{ fontSize:'40px', marginBottom:'12px' }}>👋</div>
-            <p style={{ fontSize:'18px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', color:D, marginBottom:'8px' }}>Sign out?</p>
-            <p style={{ fontSize:'13px', color:'#94a3b8', marginBottom:'24px' }}>You'll be returned to the login screen.</p>
-            <div style={{ display:'flex', gap:'10px' }}>
-              <button onClick={() => setShowLogout(false)} style={{ flex:1, padding:'13px', borderRadius:'10px', border:'1.5px solid #e4e8e7', background:'white', color:'#64748b', fontSize:'14px', fontWeight:'600', cursor:'pointer' }}>Cancel</button>
-              <button onClick={onLogout} style={{ flex:1, padding:'13px', borderRadius:'10px', border:'none', background:'#dc2626', color:'white', fontSize:'14px', fontWeight:'700', cursor:'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>Sign out</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── MAIN APP ───────────────────────────────────────────────────────────────
-export default function App() {
-  const [role, setRole] = useState(() => localStorage.getItem('slc_role') || null)
-
-  const login = (r) => { localStorage.setItem('slc_role', r); setRole(r) }
-  const logout = () => { localStorage.removeItem('slc_role'); setRole(null) }
-
-  if (!role) return <Login onLogin={login} />
-  if (role === 'education') return <EducationApp onLogout={logout} />
-  return <AdminApp onLogout={logout} />
-}
-
-function AdminApp({ onLogout }) {
-  const [section, setSection]       = useState('students')
-  const [showLogout, setShowLogout] = useState(false)
-
-  return (
-    <div style={{ display:'flex', minHeight:'100vh', background:'#f0f2f1', fontFamily:"'DM Sans',sans-serif" }}>
-      {/* Sidebar */}
+    <>
       <aside style={{ width:'230px', flexShrink:0, background:D, display:'flex', flexDirection:'column', position:'sticky', top:0, height:'100vh', overflow:'hidden' }}>
         <div style={{ padding:'22px 18px 18px', borderBottom:'1px solid rgba(255,255,255,0.07)' }}>
           <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
@@ -233,30 +106,28 @@ function AdminApp({ onLogout }) {
             </div>
             <div>
               <div style={{ fontSize:'13px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', color:'white', letterSpacing:'-0.2px', lineHeight:'1.2' }}>Smart LC</div>
-              <div style={{ fontSize:'10px', color:G, fontWeight:'600', marginTop:'2px' }}>Admin Panel</div>
+              <div style={{ fontSize:'10px', color:G, fontWeight:'600', marginTop:'2px' }}>{brand}</div>
             </div>
           </div>
         </div>
-
         <nav style={{ flex:1, padding:'14px 10px', overflowY:'auto' }}>
           <p style={{ fontSize:'10px', fontWeight:'700', color:'rgba(255,255,255,0.25)', textTransform:'uppercase', letterSpacing:'0.09em', padding:'0 8px', marginBottom:'8px' }}>Navigation</p>
-          {NAV.map(item => {
+          {nav.map(item => {
             const active = section === item.id
             return (
               <button key={item.id} onClick={() => setSection(item.id)}
-                style={{ width:'100%', padding:'10px 12px', borderRadius:'8px', border:'none', background: active ? `${G}22` : 'transparent', color: active ? G : 'rgba(255,255,255,0.45)', fontSize:'13px', fontWeight: active ? '700' : '500', cursor:'pointer', textAlign:'left', display:'flex', alignItems:'center', gap:'10px', marginBottom:'2px', transition:'all 0.15s', fontFamily:"'DM Sans',sans-serif" }}>
-                <span style={{ opacity: active ? 1 : 0.7, flexShrink:0 }}>{item.icon}</span>
+                style={{ width:'100%', padding:'10px 12px', borderRadius:'8px', border:'none', background:active?`${G}22`:'transparent', color:active?G:'rgba(255,255,255,0.45)', fontSize:'13px', fontWeight:active?'700':'500', cursor:'pointer', textAlign:'left', display:'flex', alignItems:'center', gap:'10px', marginBottom:'2px', transition:'all 0.15s', fontFamily:"'DM Sans',sans-serif" }}>
+                <span style={{ opacity:active?1:0.7, flexShrink:0 }}>{item.icon}</span>
                 {item.label}
                 {active && <div style={{ width:'4px', height:'4px', borderRadius:'50%', background:G, marginLeft:'auto', flexShrink:0 }} />}
               </button>
             )
           })}
         </nav>
-
         <div style={{ padding:'14px 10px', borderTop:'1px solid rgba(255,255,255,0.07)' }}>
           <div style={{ padding:'10px 12px', marginBottom:'6px' }}>
-            <div style={{ fontSize:'12px', fontWeight:'700', color:'rgba(255,255,255,0.6)' }}>Administrator</div>
-            <div style={{ fontSize:'11px', color:'rgba(255,255,255,0.3)', marginTop:'1px' }}>admin</div>
+            <div style={{ fontSize:'12px', fontWeight:'700', color:'rgba(255,255,255,0.6)', textTransform:'capitalize' }}>{role === 'admin' ? 'Administrator' : role === 'manager' ? 'Manager' : 'Education Dept'}</div>
+            <div style={{ fontSize:'11px', color:'rgba(255,255,255,0.3)', marginTop:'1px' }}>{role}</div>
           </div>
           <button onClick={() => setShowLogout(true)}
             style={{ width:'100%', padding:'10px 12px', borderRadius:'8px', border:'1px solid rgba(255,255,255,0.1)', background:'transparent', color:'rgba(255,255,255,0.35)', fontSize:'13px', fontWeight:'500', cursor:'pointer', textAlign:'left', fontFamily:"'DM Sans',sans-serif", display:'flex', alignItems:'center', gap:'8px', transition:'all 0.15s' }}
@@ -267,26 +138,6 @@ function AdminApp({ onLogout }) {
           </button>
         </div>
       </aside>
-
-      <div style={{ flex:1, display:'flex', flexDirection:'column', minWidth:0 }}>
-        <header style={{ background:'white', borderBottom:'1px solid #e4e8e7', padding:'0 32px', height:'58px', display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
-          <h1 style={{ fontSize:'20px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', color:D, letterSpacing:'-0.3px' }}>{TITLES[section]}</h1>
-          <div style={{ fontSize:'13px', color:'#94a3b8' }}>
-            {new Date().toLocaleDateString('en-US',{ weekday:'long', month:'long', day:'numeric', year:'numeric' })}
-          </div>
-        </header>
-        <main style={{ flex:1, padding:'28px 32px', overflowY:'auto' }}>
-          {section === 'students'      && <StudentsSection />}
-          {section === 'groups'        && <GroupsSection />}
-          {section === 'payments'      && <PaymentsSection />}
-          {section === 'tests'         && <TestsSection />}
-          {section === 'parents'       && <ParentsSection />}
-          {section === 'teachers'      && <TeachersSection />}
-          {section === 'announcements' && <AnnouncementsSection />}
-          {section === 'holidays'      && <HolidaysSection />}
-          {section === 'requests'      && <RequestsSection />}
-        </main>
-      </div>
 
       {showLogout && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.45)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:300 }}>
@@ -301,8 +152,163 @@ function AdminApp({ onLogout }) {
           </div>
         </div>
       )}
+    </>
+  )
+}
 
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap'); *{box-sizing:border-box;margin:0;padding:0} body{background:#f0f2f1}`}</style>
+// ── NAV ICONS (shared) ─────────────────────────────────────────────────────
+const ICONS = {
+  students:      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
+  payments:      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>,
+  tests:         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>,
+  parents:       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>,
+  teachers:      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
+  groups:        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>,
+  announcements: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>,
+  holidays:      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/></svg>,
+  requests:      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="12" y2="17"/></svg>,
+}
+
+// ── ADMIN NAV — no announcements, holidays, requests ──────────────────────
+const ADMIN_NAV = [
+  { id:'students', label:'Students' },
+  { id:'payments', label:'Payments' },
+  { id:'tests',    label:'Placement Tests' },
+  { id:'parents',  label:'Parents' },
+  { id:'teachers', label:'Teachers' },
+  { id:'groups',   label:'Groups' },
+].map(x => ({ ...x, icon: ICONS[x.id] }))
+
+// ── MANAGER NAV — all sections, payments first ─────────────────────────────
+const MANAGER_NAV = [
+  { id:'payments',      label:'Payments' },
+  { id:'announcements', label:'Announcements' },
+  { id:'holidays',      label:'Holidays' },
+  { id:'requests',      label:'Requests' },
+  { id:'students',      label:'Students' },
+  { id:'tests',         label:'Placement Tests' },
+  { id:'parents',       label:'Parents' },
+  { id:'teachers',      label:'Teachers' },
+  { id:'groups',        label:'Groups' },
+].map(x => ({ ...x, icon: ICONS[x.id] }))
+
+const TITLES = {
+  students:'Students', payments:'Payments', tests:'Placement Tests',
+  parents:'Parents', teachers:'Teachers', groups:'Groups',
+  announcements:'Announcements', holidays:'Holidays', requests:'Requests',
+}
+
+// ── READ-ONLY BADGE ────────────────────────────────────────────────────────
+function ReadOnlyBadge() {
+  return (
+    <span style={{ fontSize:'10px', fontWeight:'700', padding:'3px 8px', borderRadius:'6px', background:'#fef9ec', color:'#92400e', border:'1px solid #fde68a', marginLeft:'10px', verticalAlign:'middle' }}>
+      VIEW ONLY
+    </span>
+  )
+}
+
+// ── EDUCATION DEPARTMENT ───────────────────────────────────────────────────
+const EDU_NAV = [
+  { id:'vocab',    label:'Vocabulary Recap', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg> },
+  { id:'hw',       label:'Essay Images',     icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg> },
+  { id:'progress', label:'Progress Tests',   icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> },
+]
+
+function EducationApp({ onLogout }) {
+  const [section, setSection] = useState('vocab')
+  return (
+    <div style={{ display:'flex', minHeight:'100vh', background:'#f0f2f1', fontFamily:"'DM Sans',sans-serif" }}>
+      <Sidebar nav={EDU_NAV} section={section} setSection={setSection} brand="Education Dept" role="education" onLogout={onLogout} />
+      <div style={{ flex:1, display:'flex', flexDirection:'column', minWidth:0 }}>
+        <header style={{ background:'white', borderBottom:'1px solid #e4e8e7', padding:'0 32px', height:'58px', display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
+          <h1 style={{ fontSize:'20px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', color:D, letterSpacing:'-0.3px' }}>
+            {section==='vocab'?'Vocabulary Recap':section==='hw'?'Essay Images':'Progress Tests'}
+          </h1>
+          <div style={{ fontSize:'13px', color:'#94a3b8' }}>{new Date().toLocaleDateString('en-US',{ weekday:'long', month:'long', day:'numeric', year:'numeric' })}</div>
+        </header>
+        <main style={{ flex:1, overflowY:'auto' }}>
+          {section==='vocab'    && <VocabAdmin />}
+          {section==='hw'       && <EssayImageAdmin />}
+          {section==='progress' && <ProgressTestAdmin />}
+        </main>
+      </div>
     </div>
   )
+}
+
+// ── MANAGER APP ────────────────────────────────────────────────────────────
+// Manager has full access to Payments, Announcements, Holidays, Requests
+// All other sections are read-only (no add/edit/delete)
+function ManagerApp({ onLogout }) {
+  const [section, setSection] = useState('payments')
+
+  // Read-only sections for manager
+  const readOnlySections = ['students', 'tests', 'parents', 'teachers', 'groups']
+  const isReadOnly = readOnlySections.includes(section)
+
+  return (
+    <div style={{ display:'flex', minHeight:'100vh', background:'#f0f2f1', fontFamily:"'DM Sans',sans-serif" }}>
+      <Sidebar nav={MANAGER_NAV} section={section} setSection={setSection} brand="Manager Panel" role="manager" onLogout={onLogout} />
+      <div style={{ flex:1, display:'flex', flexDirection:'column', minWidth:0 }}>
+        <header style={{ background:'white', borderBottom:'1px solid #e4e8e7', padding:'0 32px', height:'58px', display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
+          <h1 style={{ fontSize:'20px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', color:D, letterSpacing:'-0.3px' }}>
+            {TITLES[section]}
+            {isReadOnly && <ReadOnlyBadge />}
+          </h1>
+          <div style={{ fontSize:'13px', color:'#94a3b8' }}>{new Date().toLocaleDateString('en-US',{ weekday:'long', month:'long', day:'numeric', year:'numeric' })}</div>
+        </header>
+        <main style={{ flex:1, padding:'28px 32px', overflowY:'auto' }}>
+          {/* Full access */}
+          {section==='payments'      && <PaymentsSection />}
+          {section==='announcements' && <AnnouncementsSection />}
+          {section==='holidays'      && <HolidaysSection />}
+          {section==='requests'      && <RequestsSection />}
+          {/* Read-only — pass readOnly prop */}
+          {section==='students'      && <StudentsSection readOnly />}
+          {section==='tests'         && <TestsSection    readOnly />}
+          {section==='parents'       && <ParentsSection  readOnly />}
+          {section==='teachers'      && <TeachersSection readOnly />}
+          {section==='groups'        && <GroupsSection   readOnly />}
+        </main>
+      </div>
+    </div>
+  )
+}
+
+// ── ADMIN APP ──────────────────────────────────────────────────────────────
+// Admin no longer has Announcements, Holidays, Requests
+// Payments is readOnly for admin (record only, no edit/delete/collected)
+function AdminApp({ onLogout }) {
+  const [section, setSection] = useState('students')
+  return (
+    <div style={{ display:'flex', minHeight:'100vh', background:'#f0f2f1', fontFamily:"'DM Sans',sans-serif" }}>
+      <Sidebar nav={ADMIN_NAV} section={section} setSection={setSection} brand="Admin Panel" role="admin" onLogout={onLogout} />
+      <div style={{ flex:1, display:'flex', flexDirection:'column', minWidth:0 }}>
+        <header style={{ background:'white', borderBottom:'1px solid #e4e8e7', padding:'0 32px', height:'58px', display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
+          <h1 style={{ fontSize:'20px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', color:D, letterSpacing:'-0.3px' }}>{TITLES[section]}</h1>
+          <div style={{ fontSize:'13px', color:'#94a3b8' }}>{new Date().toLocaleDateString('en-US',{ weekday:'long', month:'long', day:'numeric', year:'numeric' })}</div>
+        </header>
+        <main style={{ flex:1, padding:'28px 32px', overflowY:'auto' }}>
+          {section==='students' && <StudentsSection />}
+          {section==='groups'   && <GroupsSection />}
+          {section==='payments' && <PaymentsSection readOnly />}
+          {section==='tests'    && <TestsSection />}
+          {section==='parents'  && <ParentsSection />}
+          {section==='teachers' && <TeachersSection />}
+        </main>
+      </div>
+    </div>
+  )
+}
+
+// ── MAIN ───────────────────────────────────────────────────────────────────
+export default function App() {
+  const [role, setRole] = useState(() => localStorage.getItem('slc_role') || null)
+  const login  = (r) => { localStorage.setItem('slc_role', r); setRole(r) }
+  const logout = ()  => { localStorage.removeItem('slc_role'); setRole(null) }
+
+  if (!role)                  return <Login onLogin={login} />
+  if (role === 'education')   return <EducationApp onLogout={logout} />
+  if (role === 'manager')     return <ManagerApp   onLogout={logout} />
+  return <AdminApp onLogout={logout} />
 }
