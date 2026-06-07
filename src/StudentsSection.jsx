@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from './supabase'
 
 const G  = '#009472'
@@ -13,7 +13,6 @@ const dayLabel = d => d === 'odd' ? 'Mon / Wed / Fri' : 'Tue / Thu / Sat'
 const inp = { width:'100%', padding:'11px 14px', borderRadius:'10px', border:'1.5px solid #e4e8e7', fontSize:'14px', outline:'none', color:D, fontFamily:"'DM Sans',sans-serif", boxSizing:'border-box', marginBottom:'14px' }
 const lbl = { fontSize:'11px', fontWeight:'700', color:'#64748b', textTransform:'uppercase', letterSpacing:'0.05em', display:'block', marginBottom:'6px' }
 
-// ── BACK BUTTON ───────────────────────────────────────────────────────────────
 function Back({ label, onClick }) {
   return (
     <button onClick={onClick} style={{ display:'flex', alignItems:'center', gap:'6px', background:'none', border:'none', cursor:'pointer', color:'#64748b', fontSize:'13px', fontWeight:'600', marginBottom:'20px', padding:0, fontFamily:"'DM Sans',sans-serif" }}>
@@ -23,7 +22,6 @@ function Back({ label, onClick }) {
   )
 }
 
-// ── TRANSFER MODAL ────────────────────────────────────────────────────────────
 function TransferModal({ student, currentGroup, onClose, onDone }) {
   const [groups,    setGroups]    = useState([])
   const [teachers,  setTeachers]  = useState({})
@@ -104,7 +102,6 @@ function TransferModal({ student, currentGroup, onClose, onDone }) {
   )
 }
 
-// ── ADD STUDENT MODAL ─────────────────────────────────────────────────────────
 function AddStudentModal({ group, onClose, onSaved }) {
   const [fullName,     setFullName]     = useState('')
   const [username,     setUsername]     = useState('')
@@ -147,7 +144,7 @@ function AddStudentModal({ group, onClose, onSaved }) {
         <label style={lbl}>Phone Number</label>
         <input value={phone} onChange={e=>setPhone(e.target.value)} placeholder="+998 90 123 45 67" style={inp} />
         <label style={lbl}>Enrolled Date</label>
-        <input type="date" value={enrolledDate} onChange={e=>setEnrolledDate(e.target.value)} style={{ ...inp, marginBottom: error ? '8px' : '16px' }} />
+        <input type="date" value={enrolledDate} onChange={e=>setEnrolledDate(e.target.value)} style={{ ...inp, marginBottom:error?'8px':'16px' }} />
         {error && <div style={{ color:'#ef4444', fontSize:'13px', fontWeight:'600', marginBottom:'14px' }}>{error}</div>}
         <div style={{ display:'flex', gap:'10px' }}>
           <button onClick={onClose} style={{ flex:1, padding:'12px', borderRadius:'12px', border:'1.5px solid #e4e8e7', background:'white', color:'#64748b', fontSize:'14px', fontWeight:'600', cursor:'pointer' }}>Cancel</button>
@@ -160,7 +157,6 @@ function AddStudentModal({ group, onClose, onSaved }) {
   )
 }
 
-// ── EDIT STUDENT MODAL ────────────────────────────────────────────────────────
 function EditStudentModal({ student, group, onClose, onSaved }) {
   const [fullName,     setFullName]     = useState(student.full_name)
   const [password,     setPassword]     = useState(student.password || '')
@@ -176,7 +172,6 @@ function EditStudentModal({ student, group, onClose, onSaved }) {
 
   const deleteStudent = async () => {
     setDeleting(true)
-    // Delete related records first (in case CASCADE isn't set up)
     await Promise.all([
       supabase.from('attendance').delete().eq('student_username', student.username),
       supabase.from('homework_submissions').delete().eq('student_username', student.username),
@@ -193,12 +188,9 @@ function EditStudentModal({ student, group, onClose, onSaved }) {
     if (status === 'left' && !leftDate) { setError('Please set the date the student left.'); return }
     setSaving(true); setError('')
     const { error: err } = await supabase.from('students').update({
-      full_name: fullName.trim(),
-      password: password.trim(),
-      phone: phone.trim() || null,
-      enrolled_date: enrolledDate || null,
-      status,
-      left_date: status === 'left' ? leftDate : null,
+      full_name: fullName.trim(), password: password.trim(),
+      phone: phone.trim() || null, enrolled_date: enrolledDate || null,
+      status, left_date: status === 'left' ? leftDate : null,
     }).eq('username', student.username)
     if (err) { setError(err.message); setSaving(false); return }
     onSaved()
@@ -232,7 +224,7 @@ function EditStudentModal({ student, group, onClose, onSaved }) {
         <label style={lbl}>Status</label>
         <div style={{ display:'flex', gap:'8px', marginBottom:'14px' }}>
           {['active','left'].map(s => (
-            <button key={s} onClick={()=>setStatus(s)} style={{ flex:1, padding:'10px', borderRadius:'10px', border:`1.5px solid ${status===s?(s==='active'?G:'#ef4444'):'#e4e8e7'}`, background: status===s?(s==='active'?`${G}10`:'#fde8e8'):'white', color: status===s?(s==='active'?G:'#ef4444'):'#64748b', fontSize:'13px', fontWeight:'700', cursor:'pointer', textTransform:'capitalize' }}>
+            <button key={s} onClick={()=>setStatus(s)} style={{ flex:1, padding:'10px', borderRadius:'10px', border:`1.5px solid ${status===s?(s==='active'?G:'#ef4444'):'#e4e8e7'}`, background:status===s?(s==='active'?`${G}10`:'#fde8e8'):'white', color:status===s?(s==='active'?G:'#ef4444'):'#64748b', fontSize:'13px', fontWeight:'700', cursor:'pointer', textTransform:'capitalize' }}>
               {s === 'active' ? '✓ Active' : '✗ Left'}
             </button>
           ))}
@@ -249,7 +241,6 @@ function EditStudentModal({ student, group, onClose, onSaved }) {
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={G} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
           Transfer to another group
         </button>
-        {/* ── Delete student ── */}
         {!confirmDel ? (
           <button onClick={() => setConfirmDel(true)}
             style={{ width:'100%', padding:'10px', borderRadius:'10px', border:'1.5px solid #fde8e8', background:'white', color:'#ef4444', fontSize:'13px', fontWeight:'700', cursor:'pointer', marginBottom:'12px', marginTop:'4px' }}>
@@ -258,21 +249,16 @@ function EditStudentModal({ student, group, onClose, onSaved }) {
         ) : (
           <div style={{ background:'#fde8e8', borderRadius:'12px', padding:'14px 16px', marginBottom:'12px' }}>
             <div style={{ fontSize:'13px', fontWeight:'700', color:'#991b1b', marginBottom:'10px' }}>
-              Permanently delete <strong>{student.full_name}</strong>? This removes all their data — attendance, homework, payments. This cannot be undone.
+              Permanently delete <strong>{student.full_name}</strong>? This cannot be undone.
             </div>
             <div style={{ display:'flex', gap:'8px' }}>
-              <button onClick={() => setConfirmDel(false)}
-                style={{ flex:1, padding:'9px', borderRadius:'9px', border:'1.5px solid #fca5a5', background:'white', color:'#64748b', fontSize:'13px', fontWeight:'600', cursor:'pointer' }}>
-                Cancel
-              </button>
-              <button onClick={deleteStudent} disabled={deleting}
-                style={{ flex:2, padding:'9px', borderRadius:'9px', border:'none', background:'#ef4444', color:'white', fontSize:'13px', fontWeight:'700', cursor:'pointer' }}>
+              <button onClick={() => setConfirmDel(false)} style={{ flex:1, padding:'9px', borderRadius:'9px', border:'1.5px solid #fca5a5', background:'white', color:'#64748b', fontSize:'13px', fontWeight:'600', cursor:'pointer' }}>Cancel</button>
+              <button onClick={deleteStudent} disabled={deleting} style={{ flex:2, padding:'9px', borderRadius:'9px', border:'none', background:'#ef4444', color:'white', fontSize:'13px', fontWeight:'700', cursor:'pointer' }}>
                 {deleting ? 'Deleting…' : 'Yes, delete permanently'}
               </button>
             </div>
           </div>
         )}
-
         <div style={{ display:'flex', gap:'10px' }}>
           <button onClick={onClose} style={{ flex:1, padding:'12px', borderRadius:'12px', border:'1.5px solid #e4e8e7', background:'white', color:'#64748b', fontSize:'14px', fontWeight:'600', cursor:'pointer' }}>Cancel</button>
           <button onClick={save} disabled={saving} style={{ flex:2, padding:'12px', borderRadius:'12px', border:'none', background:G, color:'white', fontSize:'14px', fontWeight:'700', cursor:'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>
@@ -284,8 +270,9 @@ function EditStudentModal({ student, group, onClose, onSaved }) {
   )
 }
 
-// ── MAIN ─────────────────────────────────────────────────────────────────────
-export default function StudentsSection() {
+// readOnly = true  → manager: can navigate, search, view students, no add/edit buttons
+// readOnly = false → admin: full access
+export default function StudentsSection({ readOnly = false }) {
   const [view,            setView]           = useState('teachers')
   const [teachers,        setTeachers]       = useState([])
   const [selectedTeacher, setSelectedTeacher]= useState(null)
@@ -301,8 +288,7 @@ export default function StudentsSection() {
   const fetchTeachers = async () => {
     setLoading(true)
     const { data } = await supabase.from('teachers').select('username, full_name').neq('username','test').order('full_name')
-    setTeachers(data || [])
-    setLoading(false)
+    setTeachers(data || []); setLoading(false)
   }
 
   const fetchGroups = async (teacher) => {
@@ -322,8 +308,7 @@ export default function StudentsSection() {
     const { data } = await supabase.from('students').select('*')
       .eq('teacher_username', group.teacher_username).eq('day', group.day).eq('class_time', group.class_time)
       .order('full_name')
-    setStudents(data || [])
-    setLoading(false)
+    setStudents(data || []); setLoading(false)
   }
 
   const goToTeacher = (t) => { setSelectedTeacher(t); fetchGroups(t); setView('groups') }
@@ -333,11 +318,10 @@ export default function StudentsSection() {
     if (view==='groups')   { setView('teachers'); setSelectedTeacher(null); fetchTeachers() }
   }
 
-  // ── TEACHERS ──
   if (view === 'teachers') return (
     <div style={{ fontFamily:"'DM Sans',sans-serif" }}>
       <h2 style={{ fontSize:'20px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', color:D, marginBottom:'4px' }}>Students</h2>
-      <p style={{ fontSize:'13px', color:'#94a3b8', marginBottom:'20px' }}>Select a teacher to manage their students.</p>
+      <p style={{ fontSize:'13px', color:'#94a3b8', marginBottom:'20px' }}>Select a teacher to view their students.</p>
       {loading ? <div style={{ textAlign:'center', padding:'60px', color:'#94a3b8' }}>Loading…</div> : (
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(210px, 1fr))', gap:'12px' }}>
           {teachers.map(t => (
@@ -358,18 +342,16 @@ export default function StudentsSection() {
     </div>
   )
 
-  // ── GROUPS ──
   if (view === 'groups') return (
     <div style={{ fontFamily:"'DM Sans',sans-serif" }}>
       <Back label="All Teachers" onClick={goBack} />
       <h2 style={{ fontSize:'20px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', color:D, marginBottom:'3px' }}>{selectedTeacher?.full_name}</h2>
-      <p style={{ fontSize:'13px', color:'#94a3b8', marginBottom:'20px' }}>Select a group to view and manage students.</p>
+      <p style={{ fontSize:'13px', color:'#94a3b8', marginBottom:'20px' }}>Select a group to view students.</p>
       {loading ? <div style={{ textAlign:'center', padding:'60px', color:'#94a3b8' }}>Loading…</div> :
        groups.length === 0 ? (
         <div style={{ textAlign:'center', padding:'60px', background:'white', borderRadius:'16px' }}>
           <div style={{ fontSize:'36px', marginBottom:'10px' }}>📭</div>
           <div style={{ fontSize:'15px', fontWeight:'700', color:'#111', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>No groups yet</div>
-          <div style={{ fontSize:'13px', color:'#94a3b8', marginTop:'4px' }}>Create groups in the Groups section first.</div>
         </div>
        ) : (
         <div style={{ display:'flex', flexDirection:'column', gap:'10px', maxWidth:'540px' }}>
@@ -395,7 +377,6 @@ export default function StudentsSection() {
     </div>
   )
 
-  // ── STUDENTS ──
   if (view === 'students') return (
     <div style={{ fontFamily:"'DM Sans',sans-serif" }}>
       <Back label={selectedTeacher?.full_name} onClick={goBack} />
@@ -404,11 +385,14 @@ export default function StudentsSection() {
           <h2 style={{ fontSize:'20px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', color:D, marginBottom:'3px' }}>{selectedGroup?.level}</h2>
           <p style={{ fontSize:'13px', color:'#94a3b8' }}>{dayLabel(selectedGroup?.day)} · {TIME_SLOTS[selectedGroup?.class_time]} · {students.length} student{students.length!==1?'s':''}</p>
         </div>
-        <button onClick={() => setAddOpen(true)}
-          style={{ padding:'10px 18px', borderRadius:'10px', border:'none', background:G, color:'white', fontSize:'13px', fontWeight:'700', cursor:'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif", display:'flex', alignItems:'center', gap:'6px', boxShadow:`0 3px 12px ${G}40` }}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          Add Student
-        </button>
+        {/* Add Student button — admin only */}
+        {!readOnly && (
+          <button onClick={() => setAddOpen(true)}
+            style={{ padding:'10px 18px', borderRadius:'10px', border:'none', background:G, color:'white', fontSize:'13px', fontWeight:'700', cursor:'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif", display:'flex', alignItems:'center', gap:'6px', boxShadow:`0 3px 12px ${G}40` }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add Student
+          </button>
+        )}
       </div>
 
       {loading ? <div style={{ textAlign:'center', padding:'60px', color:'#94a3b8' }}>Loading…</div> :
@@ -416,7 +400,6 @@ export default function StudentsSection() {
         <div style={{ textAlign:'center', padding:'60px', background:'white', borderRadius:'16px' }}>
           <div style={{ fontSize:'36px', marginBottom:'10px' }}>👥</div>
           <div style={{ fontSize:'15px', fontWeight:'700', color:'#111', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>No students yet</div>
-          <div style={{ fontSize:'13px', color:'#94a3b8', marginTop:'4px' }}>Click "Add Student" to get started.</div>
         </div>
        ) : (
         <div style={{ display:'flex', flexDirection:'column', gap:'8px', maxWidth:'600px' }}>
@@ -430,10 +413,13 @@ export default function StudentsSection() {
                   <div style={{ fontSize:'11px', color:'#94a3b8', marginTop:'1px' }}>@{s.username}</div>
                 </div>
                 <div style={{ fontSize:'12px', color:'#f59e0b', fontWeight:'600', marginRight:'6px' }}>🪙 {s.coins||0}</div>
-                <button onClick={() => setEditStudent(s)}
-                  style={{ padding:'7px 14px', borderRadius:'8px', border:'1.5px solid #e4e8e7', background:'white', color:'#64748b', fontSize:'12px', fontWeight:'600', cursor:'pointer', flexShrink:0 }}>
-                  Edit
-                </button>
+                {/* Edit button — admin only */}
+                {!readOnly && (
+                  <button onClick={() => setEditStudent(s)}
+                    style={{ padding:'7px 14px', borderRadius:'8px', border:'1.5px solid #e4e8e7', background:'white', color:'#64748b', fontSize:'12px', fontWeight:'600', cursor:'pointer', flexShrink:0 }}>
+                    Edit
+                  </button>
+                )}
               </div>
             )
           })}
@@ -441,7 +427,7 @@ export default function StudentsSection() {
        )
       }
 
-      {addOpen    && <AddStudentModal  group={selectedGroup} onClose={()=>setAddOpen(false)}    onSaved={()=>{ setAddOpen(false);   fetchStudents(selectedGroup) }} />}
+      {addOpen     && <AddStudentModal  group={selectedGroup} onClose={()=>setAddOpen(false)}    onSaved={()=>{ setAddOpen(false);   fetchStudents(selectedGroup) }} />}
       {editStudent && <EditStudentModal student={editStudent} group={selectedGroup} onClose={()=>setEditStudent(null)} onSaved={()=>{ setEditStudent(null); fetchStudents(selectedGroup) }} />}
     </div>
   )

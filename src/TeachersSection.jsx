@@ -7,7 +7,7 @@ const D = '#002b2a'
 const iStyle = { width:'100%', padding:'9px 12px', borderRadius:'8px', border:'1.5px solid #e4e8e7', fontSize:'14px', outline:'none', color:D, fontFamily:"'DM Sans',sans-serif", marginBottom:'12px', boxSizing:'border-box', background:'white' }
 const lStyle = { fontSize:'11px', fontWeight:'700', color:'#64748b', textTransform:'uppercase', letterSpacing:'0.06em', display:'block', marginBottom:'5px' }
 
-export default function TeachersSection() {
+export default function TeachersSection({ readOnly = false }) {
   const [teachers, setTeachers] = useState([])
   const [students, setStudents] = useState([])
   const [loading, setLoading]   = useState(true)
@@ -29,17 +29,8 @@ export default function TeachersSection() {
     setLoading(false)
   }
 
-  const openAdd = () => {
-    setEditing(null)
-    setForm({ full_name:'', username:'', password:'' })
-    setShowForm(true)
-  }
-
-  const openEdit = (t) => {
-    setEditing(t)
-    setForm({ full_name:t.full_name, username:t.username, password:t.password||'' })
-    setShowForm(true)
-  }
+  const openAdd = () => { setEditing(null); setForm({ full_name:'', username:'', password:'' }); setShowForm(true) }
+  const openEdit = (t) => { setEditing(t); setForm({ full_name:t.full_name, username:t.username, password:t.password||'' }); setShowForm(true) }
 
   const save = async () => {
     if (!form.full_name || !form.username || !form.password) { alert('All fields are required'); return }
@@ -65,13 +56,14 @@ export default function TeachersSection() {
 
   return (
     <div>
-      {/* Header */}
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'22px' }}>
         <div style={{ fontSize:'14px', color:'#94a3b8' }}>{teachers.length} teacher accounts</div>
-        <button onClick={openAdd} style={{ padding:'9px 18px', borderRadius:'8px', border:'none', background:G, color:'white', fontSize:'13px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'700', cursor:'pointer' }}>+ Add teacher</button>
+        {/* Add teacher — admin only */}
+        {!readOnly && (
+          <button onClick={openAdd} style={{ padding:'9px 18px', borderRadius:'8px', border:'none', background:G, color:'white', fontSize:'13px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'700', cursor:'pointer' }}>+ Add teacher</button>
+        )}
       </div>
 
-      {/* Cards */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(300px, 1fr))', gap:'14px' }}>
         {teachers.map(t => {
           const activeStudents = students.filter(s => s.teacher_username === t.username && s.status !== 'left').length
@@ -80,7 +72,6 @@ export default function TeachersSection() {
             <div key={t.username} style={{ background:'white', borderRadius:'14px', border:'1.5px solid #e4e8e7', overflow:'hidden', transition:'box-shadow 0.15s' }}
               onMouseEnter={e => e.currentTarget.style.boxShadow = '0 4px 20px rgba(0,43,42,.08)'}
               onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}>
-              {/* Top colored bar */}
               <div style={{ height:'5px', background:`linear-gradient(90deg,${D},${G})` }} />
               <div style={{ padding:'20px' }}>
                 <div style={{ display:'flex', alignItems:'center', gap:'14px', marginBottom:'16px' }}>
@@ -90,8 +81,6 @@ export default function TeachersSection() {
                     <div style={{ fontSize:'12px', color:'#94a3b8', marginTop:'2px', fontFamily:'monospace' }}>@{t.username}</div>
                   </div>
                 </div>
-
-                {/* Stats */}
                 <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px', marginBottom:'16px' }}>
                   <div style={{ background:'#f8fafb', borderRadius:'8px', padding:'10px 12px' }}>
                     <div style={{ fontSize:'20px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', color:D }}>{activeStudents}</div>
@@ -104,12 +93,13 @@ export default function TeachersSection() {
                     <div style={{ fontSize:'11px', color:'#94a3b8', fontWeight:'600', marginTop:'1px' }}>Groups</div>
                   </div>
                 </div>
-
-                {/* Actions */}
-                <div style={{ display:'flex', gap:'8px' }}>
-                  <button onClick={() => openEdit(t)} style={{ flex:1, padding:'9px', borderRadius:'8px', border:`1.5px solid ${G}`, background:`${G}10`, color:G, fontSize:'13px', fontWeight:'700', cursor:'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>Edit</button>
-                  <button onClick={() => del(t.username)} style={{ flex:1, padding:'9px', borderRadius:'8px', border:'1.5px solid #fca5a5', background:'#fef2f2', color:'#dc2626', fontSize:'13px', fontWeight:'700', cursor:'pointer' }}>Delete</button>
-                </div>
+                {/* Edit/Delete — admin only */}
+                {!readOnly && (
+                  <div style={{ display:'flex', gap:'8px' }}>
+                    <button onClick={() => openEdit(t)} style={{ flex:1, padding:'9px', borderRadius:'8px', border:`1.5px solid ${G}`, background:`${G}10`, color:G, fontSize:'13px', fontWeight:'700', cursor:'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>Edit</button>
+                    <button onClick={() => del(t.username)} style={{ flex:1, padding:'9px', borderRadius:'8px', border:'1.5px solid #fca5a5', background:'#fef2f2', color:'#dc2626', fontSize:'13px', fontWeight:'700', cursor:'pointer' }}>Delete</button>
+                  </div>
+                )}
               </div>
             </div>
           )
@@ -118,34 +108,27 @@ export default function TeachersSection() {
           <div style={{ gridColumn:'1/-1', textAlign:'center', padding:'60px', background:'white', borderRadius:'14px', border:'1.5px solid #e4e8e7' }}>
             <div style={{ fontSize:'40px', marginBottom:'12px' }}>👨‍🏫</div>
             <div style={{ fontSize:'16px', fontWeight:'700', color:D, marginBottom:'4px' }}>No teachers yet</div>
-            <div style={{ fontSize:'13px', color:'#94a3b8' }}>Add your first teacher account</div>
           </div>
         )}
       </div>
 
-      {/* Modal */}
       {showForm && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.45)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:200 }}
           onClick={e => e.target===e.currentTarget && setShowForm(false)}>
           <div style={{ background:'white', borderRadius:'16px', padding:'28px', width:'420px', boxShadow:'0 24px 64px rgba(0,0,0,0.18)' }}>
             <h3 style={{ fontSize:'18px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', color:D, marginBottom:'20px' }}>{editing ? 'Edit Teacher' : 'Add New Teacher'}</h3>
-
             <label style={lStyle}>Full Name *</label>
             <input value={form.full_name} onChange={e => setForm(p=>({...p,full_name:e.target.value}))} placeholder="e.g. Abdurahmon Toshmatov" style={iStyle} />
-
             <label style={lStyle}>Username *</label>
             <input value={form.username} onChange={e => setForm(p=>({...p,username:e.target.value}))} placeholder="e.g. abdurahmon" disabled={!!editing} style={{...iStyle, opacity:editing?.6:1}} />
             {!editing && <p style={{ fontSize:'11px', color:'#94a3b8', marginTop:'-8px', marginBottom:'12px' }}>Used to log into the Staff App</p>}
-
             <label style={lStyle}>Password *</label>
             <input value={form.password} onChange={e => setForm(p=>({...p,password:e.target.value}))} placeholder="Set a password" style={iStyle} />
-
             {editing && (
               <div style={{ background:`${G}08`, borderRadius:'8px', padding:'10px 14px', marginBottom:'12px', fontSize:'13px', color:'#64748b' }}>
                 ℹ️ Username cannot be changed. Only name and password can be updated.
               </div>
             )}
-
             <div style={{ display:'flex', gap:'10px', marginTop:'8px' }}>
               <button onClick={() => setShowForm(false)} style={{ flex:1, padding:'12px', borderRadius:'8px', border:'1.5px solid #e4e8e7', background:'white', color:'#64748b', fontSize:'14px', fontWeight:'600', cursor:'pointer' }}>Cancel</button>
               <button onClick={save} disabled={saving} style={{ flex:1, padding:'12px', borderRadius:'8px', border:'none', background:G, color:'white', fontSize:'14px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'700', cursor:'pointer' }}>
