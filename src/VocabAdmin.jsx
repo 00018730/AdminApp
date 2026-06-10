@@ -54,23 +54,30 @@ async function generateBatch(words) {
 
 // ── AI HELPERS ────────────────────────────────────────────────────────────────
 async function aiTranslate(word) {
-  const apiKey = import.meta.env.VITE_OPENAI_API_KEY
-  if (!apiKey) throw new Error('VITE_OPENAI_API_KEY not set')
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+  // Use Anthropic API — OpenAI chat/completions blocks CORS from browser
+  const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY
+  if (!apiKey) throw new Error('VITE_ANTHROPIC_API_KEY not set')
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
     body: JSON.stringify({
-      model: 'gpt-4o-mini',
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 80,
+      system: 'You are a translator. Reply ONLY with a JSON object, no markdown, no explanation.',
       messages: [{
         role: 'user',
         content: `Translate the English word "${word}" into Uzbek and Russian. Reply ONLY with JSON: {"uz":"...","ru":"..."}`
       }],
-      max_tokens: 60,
     })
   })
-  if (!res.ok) throw new Error('Translation failed')
+  if (!res.ok) throw new Error('Translation failed: ' + res.status)
   const data = await res.json()
-  const text = data.choices[0].message.content.replace(/```json|```/g,'').trim()
+  const text = data.content[0].text.replace(/```json|```/g,'').trim()
   return JSON.parse(text)
 }
 
