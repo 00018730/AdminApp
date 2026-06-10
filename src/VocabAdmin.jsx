@@ -3,22 +3,42 @@ import { supabase } from './supabase'
 
 const G  = '#009472'
 const D  = '#002b2a'
-const BATCH = 8  // words per AI call
+const BATCH = 8
 
 const lbl = { fontSize:'11px', fontWeight:'700', color:'#64748b', textTransform:'uppercase', letterSpacing:'0.05em', display:'block', marginBottom:'6px' }
 const inp = { width:'100%', padding:'11px 14px', borderRadius:'10px', border:'1.5px solid #e4e8e7', fontSize:'14px', outline:'none', color:D, fontFamily:"'DM Sans',sans-serif", boxSizing:'border-box' }
 
-// ── PARSE PASTED WORDS ─────────────────────────────────────────────────────────
+const POS_OPTIONS = ['noun','verb','adjective','adverb','phrase','preposition','conjunction','pronoun']
+const POS_COLORS  = {
+  verb:       { bg:'#dbeafe', color:'#1d4ed8' },
+  noun:       { bg:'#dcfce7', color:'#15803d' },
+  adjective:  { bg:'#fef9c3', color:'#854d0e' },
+  adverb:     { bg:'#ede9fe', color:'#6d28d9' },
+  phrase:     { bg:'#ffedd5', color:'#c2410c' },
+  preposition:{ bg:'#fce7f3', color:'#be185d' },
+  conjunction:{ bg:'#f0fdf4', color:'#166534' },
+  pronoun:    { bg:'#f0f9ff', color:'#0369a1' },
+}
+
+function PosBadge({ pos }) {
+  if (!pos) return null
+  const c = POS_COLORS[pos.toLowerCase()] || { bg:'#f0f2f1', color:'#64748b' }
+  return (
+    <span style={{ fontSize:'10px', fontWeight:'700', padding:'2px 7px', borderRadius:'6px', background:c.bg, color:c.color, marginLeft:'6px' }}>
+      {pos}
+    </span>
+  )
+}
+
 function parseWords(raw) {
   return raw
     .split(/[\n,]+/)
-    .map(w => w.replace(/^\d+[\.\)]\s*/, '').trim())  // remove leading "1. " or "1) "
+    .map(w => w.replace(/^\d+[\.\)]\s*/, '').trim())
     .filter(Boolean)
-    .map(w => w.charAt(0).toUpperCase() + w.slice(1))  // capitalise first letter
-    .filter((w, i, arr) => arr.indexOf(w) === i)        // deduplicate
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .filter((w, i, arr) => arr.indexOf(w) === i)
 }
 
-// ── AI: GENERATE DEFINITIONS + SENTENCES ─────────────────────────────────────
 async function generateBatch(words) {
   const res = await fetch('/api/generate-vocab', {
     method: 'POST',
@@ -31,7 +51,60 @@ async function generateBatch(words) {
   }
   return res.json()
 }
-// ── IMAGE SLOT ─────────────────────────────────────────────────────────────────
+
+// ── AI HELPERS ────────────────────────────────────────────────────────────────
+async function aiTranslate(word) {
+  const apiKey = import.meta.env.VITE_OPENAI_API_KEY
+  if (!apiKey) throw new Error('VITE_OPENAI_API_KEY not set')
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gpt-4o-mini',
+      messages: [{
+        role: 'user',
+        content: `Translate the English word "${word}" into Uzbek and Russian. Reply ONLY with JSON: {"uz":"...","ru":"..."}`
+      }],
+      max_tokens: 60,
+    })
+  })
+  if (!res.ok) throw new Error('Translation failed')
+  const data = await res.json()
+  const text = data.choices[0].message.content.replace(/```json|```/g,'').trim()
+  return JSON.parse(text)
+}
+
+async function aiGenerateSentence(word, apiKey) {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type':'application/json', 'x-api-key':apiKey, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514', max_tokens: 80,
+      system: 'Generate one short natural example sentence (max 12 words) for an English vocabulary word. Reply with ONLY the sentence.',
+      messages: [{ role:'user', content:`Word: "${word}"` }]
+    })
+  })
+  if (!res.ok) throw new Error('Generation failed')
+  const data = await res.json()
+  return data.content[0].text.trim().replace(/^["']|["']$/g,'')
+}
+
+async function aiGenerateScramble(word, apiKey) {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type':'application/json', 'x-api-key':apiKey, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514', max_tokens: 80,
+      system: 'Generate one very simple short sentence (5-8 words, A1/A2 level English, suitable for absolute beginners) that uses the given word. Reply with ONLY the sentence, no punctuation except a period at the end.',
+      messages: [{ role:'user', content:`Word: "${word}"` }]
+    })
+  })
+  if (!res.ok) throw new Error('Generation failed')
+  const data = await res.json()
+  return data.content[0].text.trim().replace(/^["']|["']$/g,'')
+}
+
+// ── IMAGE SLOT ────────────────────────────────────────────────────────────────
 const SLOT_META = [
   { label:'✓ Correct', color:G,         bg:'#d1fae5' },
   { label:'✗ Wrong 1', color:'#ef4444', bg:'#fee2e2' },
@@ -64,134 +137,228 @@ function ImageSlot({ meta, preview, onFile, onRemove }) {
 
 // ── EDIT WORD MODAL ────────────────────────────────────────────────────────────
 function EditWordModal({ word, level, lessonOrder, onClose, onSaved }) {
-  const [form,       setForm]       = useState({ word: word.word, definition: word.definition||'', example_sentence: word.example_sentence||'', sentence: word.sentence||'' })
-  const [genLoading, setGenLoading] = useState(false)
-  const [imgFiles,   setImgFiles]   = useState([null,null,null,null])
-  const [imgPrevs,   setImgPrevs]   = useState([word.picture_url||null, word.picture_url_2||null, word.picture_url_3||null, word.picture_url_4||null])
-  const [imgRemoved, setImgRemoved] = useState([false,false,false,false])
-  const [saving,     setSaving]     = useState(false)
-  const [error,      setError]      = useState('')
+  const isBeginner   = level === 'Beginner'
+  const isElementary = level === 'Elementary'
+  const showTrans    = isBeginner || isElementary
+  const showDef      = !isBeginner
+
+  const [form, setForm] = useState({
+    word:              word.word || '',
+    part_of_speech:    word.part_of_speech || '',
+    definition:        word.definition || '',
+    example_sentence:  word.example_sentence || '',
+    sentence:          word.sentence || '',
+    translation_uz:    word.translation_uz || '',
+    translation_ru:    word.translation_ru || '',
+    scramble_sentence: word.scramble_sentence || '',
+  })
+
+  const [genLoading,       setGenLoading]       = useState(false)
+  const [transLoading,     setTransLoading]      = useState(false)
+  const [scrambleLoading,  setScrambleLoading]   = useState(false)
+  const [imgFiles,         setImgFiles]          = useState([null,null,null,null])
+  const [imgPrevs,         setImgPrevs]          = useState([word.picture_url||null, word.picture_url_2||null, word.picture_url_3||null, word.picture_url_4||null])
+  const [imgRemoved,       setImgRemoved]        = useState([false,false,false,false])
+  const [saving,           setSaving]            = useState(false)
+  const [error,            setError]             = useState('')
 
   const ORIG = [word.picture_url||null, word.picture_url_2||null, word.picture_url_3||null, word.picture_url_4||null]
 
   const handleFile = (i, file) => {
-    const f = [...imgFiles]; f[i] = file; setImgFiles(f)
-    const p = [...imgPrevs]; p[i] = URL.createObjectURL(file); setImgPrevs(p)
-    const r = [...imgRemoved]; r[i] = false; setImgRemoved(r)
+    const f=[...imgFiles];f[i]=file;setImgFiles(f)
+    const p=[...imgPrevs];p[i]=URL.createObjectURL(file);setImgPrevs(p)
+    const r=[...imgRemoved];r[i]=false;setImgRemoved(r)
   }
-
   const removeSlot = (i) => {
-    const f = [...imgFiles]; f[i] = null; setImgFiles(f)
-    const p = [...imgPrevs]; p[i] = null; setImgPrevs(p)
-    const r = [...imgRemoved]; r[i] = true; setImgRemoved(r)
+    const f=[...imgFiles];f[i]=null;setImgFiles(f)
+    const p=[...imgPrevs];p[i]=null;setImgPrevs(p)
+    const r=[...imgRemoved];r[i]=true;setImgRemoved(r)
   }
 
   const uploadImages = async () => {
-    const urls = []
-    const suffix = ['correct','wrong1','wrong2','wrong3']
-    for (let i = 0; i < 4; i++) {
-      if (imgRemoved[i] && !imgFiles[i]) { urls.push(null); continue }
-      if (!imgFiles[i]) { urls.push(ORIG[i]); continue }
-      const ext      = imgFiles[i].name.split('.').pop().toLowerCase()
-      const safeName = form.word.toLowerCase()
-        .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // strip accents: café → cafe
-        .replace(/[^a-z0-9]+/g, '_')                      // non-alphanumeric → underscore
-        .replace(/^_+|_+$/g, '')                          // trim leading/trailing underscores
-      const path = `${level}/${lessonOrder}/${safeName}_${suffix[i]}.${ext}`
-      const { data: up, error: upErr } = await supabase.storage.from('vocabulary-images').upload(path, imgFiles[i], { contentType: imgFiles[i].type, upsert:true })
-      if (upErr) { setError('Image upload failed: ' + upErr.message); return null }
-      const { data: { publicUrl } } = supabase.storage.from('vocabulary-images').getPublicUrl(up.path)
+    const urls=[]
+    const suffix=['correct','wrong1','wrong2','wrong3']
+    for(let i=0;i<4;i++){
+      if(imgRemoved[i]&&!imgFiles[i]){urls.push(null);continue}
+      if(!imgFiles[i]){urls.push(ORIG[i]);continue}
+      const ext=imgFiles[i].name.split('.').pop().toLowerCase()
+      const safeName=form.word.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'')
+      const path=`${level}/${lessonOrder}/${safeName}_${suffix[i]}.${ext}`
+      const{data:up,error:upErr}=await supabase.storage.from('vocabulary-images').upload(path,imgFiles[i],{contentType:imgFiles[i].type,upsert:true})
+      if(upErr){setError('Image upload failed: '+upErr.message);return null}
+      const{data:{publicUrl}}=supabase.storage.from('vocabulary-images').getPublicUrl(up.path)
       urls.push(publicUrl)
     }
     return urls
   }
 
   const save = async () => {
-    if (!form.word.trim() || !form.definition.trim() || !form.sentence.trim()) { setError('All fields required.'); return }
-    if (!form.sentence.includes('___')) { setError('Sentence must contain ___ as the blank.'); return }
+    if (!form.word.trim()) { setError('Word is required.'); return }
+    if (showDef && !form.definition.trim()) { setError('Definition is required.'); return }
+    if (!isBeginner && form.sentence && !form.sentence.includes('___')) { setError('Sentence must contain ___ as the blank.'); return }
     const imgCount = imgPrevs.filter(Boolean).length
     if (imgCount > 0 && imgCount < 4) { setError('Upload all 4 images or none.'); return }
     setSaving(true); setError('')
     const urls = await uploadImages()
     if (!urls) { setSaving(false); return }
 
-    const row = { word: form.word.trim(), definition: form.definition.trim(), example_sentence: form.example_sentence.trim(), sentence: form.sentence.trim(), picture_url: urls[0], picture_url_2: urls[1], picture_url_3: urls[2], picture_url_4: urls[3] }
+    const row = {
+      word:              form.word.trim(),
+      part_of_speech:    form.part_of_speech || null,
+      definition:        form.definition.trim() || null,
+      example_sentence:  form.example_sentence.trim() || null,
+      sentence:          form.sentence.trim() || null,
+      translation_uz:    form.translation_uz.trim() || null,
+      translation_ru:    form.translation_ru.trim() || null,
+      scramble_sentence: form.scramble_sentence.trim() || null,
+      picture_url:       urls[0],
+      picture_url_2:     urls[1],
+      picture_url_3:     urls[2],
+      picture_url_4:     urls[3],
+    }
+
     let err
-    if (word.id) { ;({ error: err } = await supabase.from('vocabulary_words').update(row).eq('id', word.id)) }
-    else         { ;({ error: err } = await supabase.from('vocabulary_words').insert({ ...row, level, lesson_order: lessonOrder, word_order: word.word_order ?? 0 })) }
+    if (word.id) { ;({ error:err } = await supabase.from('vocabulary_words').update(row).eq('id', word.id)) }
+    else         { ;({ error:err } = await supabase.from('vocabulary_words').insert({ ...row, level, lesson_order:lessonOrder, word_order:word.word_order ?? 0 })) }
     setSaving(false)
     if (err) { setError(err.message); return }
     onSaved()
   }
 
-  const handleGenerate = async () => {
+  const handleGenExample = async () => {
     if (!form.word.trim()) { setError('Enter the word first'); return }
     const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY
-    if (!apiKey) { setError('Add VITE_ANTHROPIC_API_KEY to your admin .env file'); return }
+    if (!apiKey) { setError('VITE_ANTHROPIC_API_KEY not set'); return }
     setGenLoading(true); setError('')
     try {
-      const userMsg = form.definition
-        ? 'Word: "' + form.word + '"\nDefinition: ' + form.definition
-        : 'Word: "' + form.word + '"'
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true',
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 80,
-          system: 'Generate one short natural example sentence (max 15 words) for an English vocabulary word. Reply with ONLY the sentence.',
-          messages: [{ role: 'user', content: userMsg }],
-        }),
-      })
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}))
-        setError(res.status === 401
-          ? 'API key invalid — add VITE_ANTHROPIC_API_KEY to your admin .env file'
-          : 'AI error: ' + (errData.error?.message || res.statusText))
-        setGenLoading(false); return
-      }
-      const data = await res.json()
-      const generated = data.content[0].text.trim().replace(/^["']|["']$/g, '')
-      setForm(f => ({ ...f, example_sentence: generated }))
-    } catch (e) { setError('AI generation failed: ' + e.message) }
+      const sentence = await aiGenerateSentence(form.word, apiKey)
+      setForm(f => ({ ...f, example_sentence: sentence }))
+    } catch (e) { setError('Generation failed: ' + e.message) }
     setGenLoading(false)
+  }
+
+  const handleTranslate = async () => {
+    if (!form.word.trim()) { setError('Enter the word first'); return }
+    setTransLoading(true); setError('')
+    try {
+      const { uz, ru } = await aiTranslate(form.word)
+      setForm(f => ({ ...f, translation_uz: uz || f.translation_uz, translation_ru: ru || f.translation_ru }))
+    } catch (e) { setError('Translation failed: ' + e.message) }
+    setTransLoading(false)
+  }
+
+  const handleGenerateScramble = async () => {
+    if (!form.word.trim()) { setError('Enter the word first'); return }
+    const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY
+    if (!apiKey) { setError('VITE_ANTHROPIC_API_KEY not set'); return }
+    setScrambleLoading(true); setError('')
+    try {
+      const sentence = await aiGenerateScramble(form.word, apiKey)
+      setForm(f => ({ ...f, scramble_sentence: sentence }))
+    } catch (e) { setError('Generation failed: ' + e.message) }
+    setScrambleLoading(false)
   }
 
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:200, padding:'16px', fontFamily:"'DM Sans',sans-serif" }}
       onClick={e=>e.target===e.currentTarget&&onClose()}>
-      <div style={{ background:'white', borderRadius:'20px', padding:'24px', width:'100%', maxWidth:'480px', maxHeight:'90vh', overflowY:'auto', boxShadow:'0 20px 60px rgba(0,0,0,0.2)' }}>
+      <div style={{ background:'white', borderRadius:'20px', padding:'24px', width:'100%', maxWidth:'500px', maxHeight:'90vh', overflowY:'auto', boxShadow:'0 20px 60px rgba(0,0,0,0.2)' }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'20px' }}>
-          <span style={{ fontSize:'16px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>Edit Word</span>
+          <span style={{ fontSize:'16px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>{word.id ? 'Edit Word' : 'Add Word'}</span>
           <button onClick={onClose} style={{ width:'30px', height:'30px', borderRadius:'8px', background:'#f0f2f1', border:'none', cursor:'pointer', fontSize:'15px' }}>✕</button>
         </div>
 
+        {/* Word */}
         <label style={lbl}>Word</label>
         <input value={form.word} onChange={e=>setForm(f=>({...f,word:e.target.value}))} style={{ ...inp, marginBottom:'14px' }} />
 
-        <label style={lbl}>Definition</label>
-        <textarea value={form.definition} onChange={e=>setForm(f=>({...f,definition:e.target.value}))} rows={2}
-          style={{ ...inp, resize:'vertical', lineHeight:1.5, marginBottom:'14px' }} />
+        {/* Part of speech */}
+        <label style={lbl}>Part of Speech</label>
+        <div style={{ display:'flex', flexWrap:'wrap', gap:'6px', marginBottom:'14px' }}>
+          {POS_OPTIONS.map(pos => {
+            const active = form.part_of_speech === pos
+            const c = POS_COLORS[pos] || { bg:'#f0f2f1', color:'#64748b' }
+            return (
+              <button key={pos} type="button" onClick={() => setForm(f => ({ ...f, part_of_speech: active ? '' : pos }))}
+                style={{ padding:'5px 12px', borderRadius:'8px', border:`1.5px solid ${active ? c.color : '#e4e8e7'}`, background:active ? c.bg : 'white', color:active ? c.color : '#64748b', fontSize:'12px', fontWeight:'700', cursor:'pointer' }}>
+                {pos}
+              </button>
+            )
+          })}
+        </div>
 
-        <label style={lbl}>Example Sentence <span style={{ fontWeight:'400', textTransform:'none', color:'#94a3b8' }}>(complete sentence shown on definition card)</span></label>
-        <input value={form.example_sentence} onChange={e=>setForm(f=>({...f,example_sentence:e.target.value}))}
-          placeholder="e.g. The firefighter was very brave."
-          style={{ ...inp, marginBottom:'6px' }} />
-        <button
-          type="button"
-          onClick={handleGenerate}
-          disabled={genLoading}
-          style={{ marginBottom:'14px', padding:'8px 16px', borderRadius:'8px', border:'none', background: genLoading ? '#94a3b8' : G, color:'white', fontSize:'13px', fontWeight:'700', cursor: genLoading ? 'default' : 'pointer', display:'inline-block' }}>
-          {genLoading ? 'Generating…' : '✨ Generate with AI'}
-        </button>
+        {/* Translation — Beginner and Elementary */}
+        {showTrans && (
+          <>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'6px' }}>
+              <label style={{ ...lbl, marginBottom:0 }}>Translation</label>
+              <button type="button" onClick={handleTranslate} disabled={transLoading}
+                style={{ padding:'5px 12px', borderRadius:'8px', border:'none', background:transLoading?'#94a3b8':G, color:'white', fontSize:'12px', fontWeight:'700', cursor:transLoading?'default':'pointer' }}>
+                {transLoading ? 'Translating…' : '🌐 Generate with AI'}
+              </button>
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px', marginBottom:'14px' }}>
+              <div>
+                <div style={{ fontSize:'10px', fontWeight:'700', color:'#92400e', marginBottom:'4px' }}>🇺🇿 Uzbek</div>
+                <input value={form.translation_uz} onChange={e=>setForm(f=>({...f,translation_uz:e.target.value}))}
+                  placeholder="Uzbek translation…" style={{ ...inp, borderColor:'#fde68a' }} />
+              </div>
+              <div>
+                <div style={{ fontSize:'10px', fontWeight:'700', color:'#166534', marginBottom:'4px' }}>🇷🇺 Russian</div>
+                <input value={form.translation_ru} onChange={e=>setForm(f=>({...f,translation_ru:e.target.value}))}
+                  placeholder="Russian translation…" style={{ ...inp, borderColor:'#86efac' }} />
+              </div>
+            </div>
+          </>
+        )}
 
-        <label style={lbl}>Sentence <span style={{ fontWeight:'400', textTransform:'none', color:'#94a3b8' }}>(use ___ for the blank — shown in spelling step)</span></label>
-        <input value={form.sentence} onChange={e=>setForm(f=>({...f,sentence:e.target.value}))} style={{ ...inp, marginBottom:'20px' }} />
+        {/* Definition — Elementary and above */}
+        {showDef && (
+          <>
+            <label style={lbl}>Definition</label>
+            <textarea value={form.definition} onChange={e=>setForm(f=>({...f,definition:e.target.value}))} rows={2}
+              style={{ ...inp, resize:'vertical', lineHeight:1.5, marginBottom:'14px' }} />
+          </>
+        )}
+
+        {/* Example sentence — not Beginner */}
+        {!isBeginner && (
+          <>
+            <label style={lbl}>Example Sentence <span style={{ fontWeight:'400', textTransform:'none', color:'#94a3b8' }}>(shown on definition card)</span></label>
+            <input value={form.example_sentence} onChange={e=>setForm(f=>({...f,example_sentence:e.target.value}))}
+              placeholder="e.g. The firefighter was very brave."
+              style={{ ...inp, marginBottom:'6px' }} />
+            <button type="button" onClick={handleGenExample} disabled={genLoading}
+              style={{ marginBottom:'14px', padding:'8px 16px', borderRadius:'8px', border:'none', background:genLoading?'#94a3b8':G, color:'white', fontSize:'13px', fontWeight:'700', cursor:genLoading?'default':'pointer' }}>
+              {genLoading ? 'Generating…' : '✨ Generate with AI'}
+            </button>
+          </>
+        )}
+
+        {/* Sentence with blank — not Beginner */}
+        {!isBeginner && (
+          <>
+            <label style={lbl}>Sentence <span style={{ fontWeight:'400', textTransform:'none', color:'#94a3b8' }}>(use ___ for the blank)</span></label>
+            <input value={form.sentence} onChange={e=>setForm(f=>({...f,sentence:e.target.value}))} style={{ ...inp, marginBottom:'20px' }} />
+          </>
+        )}
+
+        {/* Scramble sentence — Beginner only */}
+        {isBeginner && (
+          <>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'6px' }}>
+              <label style={{ ...lbl, marginBottom:0 }}>Scrambled Sentence <span style={{ fontWeight:'400', textTransform:'none', color:'#94a3b8' }}>(student unscrambles)</span></label>
+              <button type="button" onClick={handleGenerateScramble} disabled={scrambleLoading}
+                style={{ padding:'5px 12px', borderRadius:'8px', border:'none', background:scrambleLoading?'#94a3b8':G, color:'white', fontSize:'12px', fontWeight:'700', cursor:scrambleLoading?'default':'pointer' }}>
+                {scrambleLoading ? 'Generating…' : '✨ Generate'}
+              </button>
+            </div>
+            <input value={form.scramble_sentence} onChange={e=>setForm(f=>({...f,scramble_sentence:e.target.value}))}
+              placeholder="e.g. I play football every day."
+              style={{ ...inp, marginBottom:'4px' }} />
+            <div style={{ fontSize:'11px', color:'#94a3b8', marginBottom:'20px' }}>Write the correct sentence — the app will scramble the words for the student.</div>
+          </>
+        )}
 
         {/* Quiz images */}
         <div style={{ marginBottom:'16px' }}>
@@ -219,38 +386,46 @@ function EditWordModal({ word, level, lessonOrder, onClose, onSaved }) {
   )
 }
 
-// ── IMPORT MODAL (paste → confirm → generate → review) ────────────────────────
+// ── IMPORT MODAL ──────────────────────────────────────────────────────────────
 function ImportModal({ level, lessonOrder, existingCount, onClose, onSaved }) {
-  const [step,      setStep]      = useState('paste')   // paste | confirm | generating | review
+  const [step,      setStep]      = useState('paste')
   const [raw,       setRaw]       = useState('')
-  const [parsed,    setParsed]    = useState([])         // clean word strings
-  const [generated, setGenerated] = useState([])         // {word, definition, sentence}
+  const [parsed,    setParsed]    = useState([])
+  const [generated, setGenerated] = useState([])
   const [progress,  setProgress]  = useState({ done:0, total:0, current:'' })
   const [error,     setError]     = useState('')
-  const [editIdx,   setEditIdx]   = useState(null)       // index in generated being edited
+  const [editIdx,   setEditIdx]   = useState(null)
   const [saving,    setSaving]    = useState(false)
 
-  // Step 1 → Step 2
+  const isBeginner   = level === 'Beginner'
+  const isElementary = level === 'Elementary'
+
   const confirm = () => {
     const words = parseWords(raw)
-    if (!words.length) { setError('No words detected. Paste at least one word.'); return }
+    if (!words.length) { setError('No words detected.'); return }
     setParsed(words); setError(''); setStep('confirm')
   }
 
-  // Step 2 → Step 3 (AI generation)
   const generate = async () => {
     setStep('generating')
-    setProgress({ done:0, total:parsed.length, current: parsed[0] })
+    setProgress({ done:0, total:parsed.length, current:parsed[0] })
     const results = []
     try {
       for (let i = 0; i < parsed.length; i += BATCH) {
         const batch = parsed.slice(i, i + BATCH)
         setProgress({ done:i, total:parsed.length, current:batch[0] })
         const batchResults = await generateBatch(batch)
-        // Match results back to original words (AI might reorder)
         for (const w of batch) {
           const found = batchResults.find(r => r.word?.toLowerCase() === w.toLowerCase())
-          results.push({ word:w, definition: found?.definition||'', sentence: found?.sentence||`She is very ___.` })
+          results.push({
+            word:              w,
+            part_of_speech:    '',
+            definition:        found?.definition || '',
+            sentence:          found?.sentence || `She is very ___.`,
+            translation_uz:    '',
+            translation_ru:    '',
+            scramble_sentence: '',
+          })
         }
       }
       setGenerated(results)
@@ -261,16 +436,19 @@ function ImportModal({ level, lessonOrder, existingCount, onClose, onSaved }) {
     }
   }
 
-  // Save all to DB
   const saveAll = async () => {
     setSaving(true)
     const rows = generated.map((g, i) => ({
       level,
-      lesson_order: lessonOrder,
-      word:         g.word,
-      definition:   g.definition,
-      sentence:     g.sentence,
-      word_order:   existingCount + i + 1,
+      lesson_order:      lessonOrder,
+      word:              g.word,
+      part_of_speech:    g.part_of_speech || null,
+      definition:        g.definition || null,
+      sentence:          g.sentence || null,
+      translation_uz:    g.translation_uz || null,
+      translation_ru:    g.translation_ru || null,
+      scramble_sentence: g.scramble_sentence || null,
+      word_order:        existingCount + i + 1,
     }))
     const { error: err } = await supabase.from('vocabulary_words').insert(rows)
     setSaving(false)
@@ -278,17 +456,20 @@ function ImportModal({ level, lessonOrder, existingCount, onClose, onSaved }) {
     onSaved()
   }
 
+  const updateGenerated = (idx, field, value) => {
+    const g = [...generated]; g[idx] = { ...g[idx], [field]: value }; setGenerated(g)
+  }
+
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.55)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:150, padding:'16px', fontFamily:"'DM Sans',sans-serif" }}
       onClick={e=>e.target===e.currentTarget&&step!=='generating'&&onClose()}>
       <div style={{ background:'white', borderRadius:'24px', width:'100%', maxWidth:'560px', maxHeight:'90vh', display:'flex', flexDirection:'column', boxShadow:'0 24px 60px rgba(0,0,0,0.25)' }}>
 
-        {/* Header */}
         <div style={{ padding:'22px 24px 16px', borderBottom:'1px solid #f0f2f1', flexShrink:0 }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
             <div>
               <div style={{ fontSize:'18px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>
-                {step==='paste'?'Paste Word List': step==='confirm'?'Confirm Words': step==='generating'?'AI Generating…':'Review & Save'}
+                {step==='paste'?'Paste Word List':step==='confirm'?'Confirm Words':step==='generating'?'AI Generating…':'Review & Save'}
               </div>
               <div style={{ fontSize:'12px', color:'#94a3b8', marginTop:'3px' }}>
                 {step==='paste'&&'Paste words separated by commas or line breaks'}
@@ -301,35 +482,30 @@ function ImportModal({ level, lessonOrder, existingCount, onClose, onSaved }) {
               <button onClick={onClose} style={{ width:'32px', height:'32px', borderRadius:'8px', background:'#f0f2f1', border:'none', cursor:'pointer', fontSize:'16px', flexShrink:0 }}>✕</button>
             )}
           </div>
-
-          {/* Step indicator */}
           <div style={{ display:'flex', gap:'6px', marginTop:'14px' }}>
             {['paste','confirm','generating','review'].map((s,i) => (
-              <div key={s} style={{ flex:1, height:'3px', borderRadius:'3px', background: ['paste','confirm','generating','review'].indexOf(step) >= i ? G : '#e4e8e7', transition:'background 0.3s' }} />
+              <div key={s} style={{ flex:1, height:'3px', borderRadius:'3px', background:['paste','confirm','generating','review'].indexOf(step)>=i?G:'#e4e8e7', transition:'background 0.3s' }} />
             ))}
           </div>
         </div>
 
-        {/* Body */}
         <div style={{ flex:1, overflowY:'auto', padding:'20px 24px' }}>
 
-          {/* ── STEP 1: PASTE ── */}
           {step==='paste' && (
             <>
               <textarea value={raw} onChange={e=>{setRaw(e.target.value);setError('')}}
-                placeholder={"Paste words here, one per line or comma-separated:\n\napple\nbeautiful\ndescription\n\nor: apple, beautiful, description"}
+                placeholder={"apple\nbeautiful\ndescription\n\nor: apple, beautiful, description"}
                 rows={12}
                 style={{ width:'100%', padding:'14px', borderRadius:'12px', border:'1.5px solid #e4e8e7', fontSize:'14px', outline:'none', resize:'vertical', fontFamily:"'DM Sans',sans-serif", lineHeight:1.6, boxSizing:'border-box', color:D }} />
               {error && <div style={{ color:'#ef4444', fontSize:'13px', fontWeight:'600', marginTop:'8px' }}>{error}</div>}
             </>
           )}
 
-          {/* ── STEP 2: CONFIRM ── */}
           {step==='confirm' && (
             <div>
               <div style={{ background:'#f8fafb', borderRadius:'12px', padding:'14px', maxHeight:'340px', overflowY:'auto', marginBottom:'4px' }}>
                 {parsed.map((w,i) => (
-                  <div key={i} style={{ display:'flex', alignItems:'center', gap:'10px', padding:'7px 0', borderBottom: i<parsed.length-1?'1px solid #f0f2f1':'none' }}>
+                  <div key={i} style={{ display:'flex', alignItems:'center', gap:'10px', padding:'7px 0', borderBottom:i<parsed.length-1?'1px solid #f0f2f1':'none' }}>
                     <span style={{ fontSize:'12px', fontWeight:'700', color:'#94a3b8', minWidth:'28px' }}>{i+1}.</span>
                     <span style={{ fontSize:'15px', fontWeight:'600', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>{w}</span>
                   </div>
@@ -337,38 +513,42 @@ function ImportModal({ level, lessonOrder, existingCount, onClose, onSaved }) {
               </div>
               <div style={{ marginTop:'12px', display:'flex', gap:'8px', alignItems:'center' }}>
                 <button onClick={()=>setStep('paste')} style={{ padding:'8px 14px', borderRadius:'10px', border:'1.5px solid #e4e8e7', background:'white', color:'#64748b', fontSize:'13px', fontWeight:'600', cursor:'pointer' }}>← Edit list</button>
-                <div style={{ flex:1, fontSize:'12px', color:'#94a3b8' }}>AI will generate definitions and sentences for all {parsed.length} words.</div>
+                <div style={{ flex:1, fontSize:'12px', color:'#94a3b8' }}>AI will generate content for all {parsed.length} words.</div>
               </div>
               {error && <div style={{ color:'#ef4444', fontSize:'13px', fontWeight:'600', marginTop:'8px' }}>{error}</div>}
             </div>
           )}
 
-          {/* ── STEP 3: GENERATING ── */}
           {step==='generating' && (
             <div style={{ textAlign:'center', padding:'40px 20px' }}>
               <div style={{ fontSize:'48px', marginBottom:'16px' }}>🤖</div>
               <div style={{ fontSize:'17px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif", marginBottom:'6px' }}>AI is generating…</div>
-              <div style={{ fontSize:'14px', color:'#94a3b8', marginBottom:'24px' }}>
-                {progress.current && `Currently: "${progress.current}"`}
-              </div>
-              {/* Progress bar */}
+              <div style={{ fontSize:'14px', color:'#94a3b8', marginBottom:'24px' }}>{progress.current && `Currently: "${progress.current}"`}</div>
               <div style={{ background:'#f0f2f1', borderRadius:'8px', overflow:'hidden', height:'8px', maxWidth:'300px', margin:'0 auto 12px' }}>
-                <div style={{ height:'100%', background:G, borderRadius:'8px', width:`${progress.total ? (progress.done/progress.total)*100 : 0}%`, transition:'width 0.4s' }} />
+                <div style={{ height:'100%', background:G, borderRadius:'8px', width:`${progress.total?(progress.done/progress.total)*100:0}%`, transition:'width 0.4s' }} />
               </div>
               <div style={{ fontSize:'13px', color:'#94a3b8', fontWeight:'600' }}>{progress.done} / {progress.total} words</div>
             </div>
           )}
 
-          {/* ── STEP 4: REVIEW ── */}
           {step==='review' && (
             <div>
               {generated.map((g, i) => (
                 <div key={i} style={{ background:'#f8fafb', borderRadius:'12px', padding:'12px 14px', marginBottom:'8px', display:'flex', alignItems:'flex-start', gap:'12px' }}>
                   <span style={{ fontSize:'12px', fontWeight:'700', color:'#94a3b8', minWidth:'24px', paddingTop:'2px' }}>{i+1}.</span>
                   <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontSize:'15px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif", marginBottom:'3px' }}>{g.word}</div>
-                    <div style={{ fontSize:'12px', color:'#64748b', marginBottom:'2px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{g.definition}</div>
-                    <div style={{ fontSize:'12px', color:'#94a3b8', fontStyle:'italic', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{g.sentence}</div>
+                    <div style={{ display:'flex', alignItems:'center', gap:'6px', marginBottom:'3px' }}>
+                      <div style={{ fontSize:'15px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>{g.word}</div>
+                      {g.part_of_speech && <PosBadge pos={g.part_of_speech} />}
+                    </div>
+                    {g.definition && <div style={{ fontSize:'12px', color:'#64748b', marginBottom:'2px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{g.definition}</div>}
+                    {(g.translation_uz || g.translation_ru) && (
+                      <div style={{ fontSize:'11px', color:'#94a3b8' }}>
+                        {g.translation_uz && `🇺🇿 ${g.translation_uz}`}
+                        {g.translation_uz && g.translation_ru && ' · '}
+                        {g.translation_ru && `🇷🇺 ${g.translation_ru}`}
+                      </div>
+                    )}
                   </div>
                   <button onClick={()=>setEditIdx(i)}
                     style={{ padding:'5px 12px', borderRadius:'8px', border:'1.5px solid #e4e8e7', background:'white', color:'#64748b', fontSize:'12px', fontWeight:'600', cursor:'pointer', flexShrink:0 }}>
@@ -377,25 +557,76 @@ function ImportModal({ level, lessonOrder, existingCount, onClose, onSaved }) {
                 </div>
               ))}
 
-              {/* Inline edit for a word in the review list */}
               {editIdx !== null && (
                 <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.4)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:200, padding:'16px' }}>
-                  <div style={{ background:'white', borderRadius:'20px', padding:'24px', width:'100%', maxWidth:'440px', boxShadow:'0 20px 60px rgba(0,0,0,0.2)' }}>
+                  <div style={{ background:'white', borderRadius:'20px', padding:'24px', width:'100%', maxWidth:'440px', maxHeight:'85vh', overflowY:'auto', boxShadow:'0 20px 60px rgba(0,0,0,0.2)' }}>
                     <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'16px' }}>
-                      <span style={{ fontSize:'16px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>Edit before saving</span>
+                      <span style={{ fontSize:'16px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>Edit: {generated[editIdx].word}</span>
                       <button onClick={()=>setEditIdx(null)} style={{ width:'28px', height:'28px', borderRadius:'8px', background:'#f0f2f1', border:'none', cursor:'pointer', fontSize:'14px' }}>✕</button>
                     </div>
-                    {['word','definition','sentence'].map(field => (
-                      <div key={field} style={{ marginBottom:'12px' }}>
-                        <label style={lbl}>{field} {field==='sentence'&&<span style={{ fontWeight:'400', textTransform:'none', color:'#94a3b8' }}>(use ___)</span>}</label>
-                        {field==='definition'
-                          ? <textarea value={generated[editIdx][field]} onChange={e=>{const g=[...generated];g[editIdx]={...g[editIdx],[field]:e.target.value};setGenerated(g)}}
-                              rows={2} style={{ ...inp, resize:'vertical', lineHeight:1.5 }} />
-                          : <input value={generated[editIdx][field]} onChange={e=>{const g=[...generated];g[editIdx]={...g[editIdx],[field]:e.target.value};setGenerated(g)}}
-                              style={inp} />
-                        }
-                      </div>
-                    ))}
+
+                    {/* Part of speech */}
+                    <label style={lbl}>Part of Speech</label>
+                    <div style={{ display:'flex', flexWrap:'wrap', gap:'6px', marginBottom:'14px' }}>
+                      {POS_OPTIONS.map(pos => {
+                        const active = generated[editIdx].part_of_speech === pos
+                        const c = POS_COLORS[pos] || { bg:'#f0f2f1', color:'#64748b' }
+                        return (
+                          <button key={pos} type="button" onClick={() => updateGenerated(editIdx, 'part_of_speech', active ? '' : pos)}
+                            style={{ padding:'4px 10px', borderRadius:'8px', border:`1.5px solid ${active?c.color:'#e4e8e7'}`, background:active?c.bg:'white', color:active?c.color:'#64748b', fontSize:'12px', fontWeight:'700', cursor:'pointer' }}>
+                            {pos}
+                          </button>
+                        )
+                      })}
+                    </div>
+
+                    {/* Translation */}
+                    {(isBeginner || isElementary) && (
+                      <>
+                        <label style={lbl}>Translation</label>
+                        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px', marginBottom:'14px' }}>
+                          <div>
+                            <div style={{ fontSize:'10px', fontWeight:'700', color:'#92400e', marginBottom:'4px' }}>🇺🇿 Uzbek</div>
+                            <input value={generated[editIdx].translation_uz} onChange={e=>updateGenerated(editIdx,'translation_uz',e.target.value)}
+                              placeholder="Uzbek…" style={{ ...inp, borderColor:'#fde68a' }} />
+                          </div>
+                          <div>
+                            <div style={{ fontSize:'10px', fontWeight:'700', color:'#166534', marginBottom:'4px' }}>🇷🇺 Russian</div>
+                            <input value={generated[editIdx].translation_ru} onChange={e=>updateGenerated(editIdx,'translation_ru',e.target.value)}
+                              placeholder="Russian…" style={{ ...inp, borderColor:'#86efac' }} />
+                          </div>
+                        </div>
+                      </>
+                    )}
+
+                    {/* Definition */}
+                    {!isBeginner && (
+                      <>
+                        <label style={lbl}>Definition</label>
+                        <textarea value={generated[editIdx].definition} onChange={e=>updateGenerated(editIdx,'definition',e.target.value)}
+                          rows={2} style={{ ...inp, resize:'vertical', lineHeight:1.5, marginBottom:'12px' }} />
+                      </>
+                    )}
+
+                    {/* Sentence */}
+                    {!isBeginner && (
+                      <>
+                        <label style={lbl}>Sentence <span style={{ fontWeight:'400', textTransform:'none', color:'#94a3b8' }}>(use ___)</span></label>
+                        <input value={generated[editIdx].sentence} onChange={e=>updateGenerated(editIdx,'sentence',e.target.value)}
+                          style={{ ...inp, marginBottom:'12px' }} />
+                      </>
+                    )}
+
+                    {/* Scramble sentence */}
+                    {isBeginner && (
+                      <>
+                        <label style={lbl}>Scrambled Sentence</label>
+                        <input value={generated[editIdx].scramble_sentence} onChange={e=>updateGenerated(editIdx,'scramble_sentence',e.target.value)}
+                          placeholder="e.g. I play football every day."
+                          style={{ ...inp, marginBottom:'12px' }} />
+                      </>
+                    )}
+
                     <button onClick={()=>setEditIdx(null)} style={{ width:'100%', padding:'12px', borderRadius:'12px', border:'none', background:G, color:'white', fontSize:'14px', fontWeight:'700', cursor:'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>Done</button>
                   </div>
                 </div>
@@ -406,12 +637,11 @@ function ImportModal({ level, lessonOrder, existingCount, onClose, onSaved }) {
           )}
         </div>
 
-        {/* Footer buttons */}
         {step !== 'generating' && (
           <div style={{ padding:'16px 24px 20px', borderTop:'1px solid #f0f2f1', flexShrink:0 }}>
-            {step==='paste'  && <button onClick={confirm} style={{ width:'100%', padding:'14px', borderRadius:'14px', border:'none', background:raw.trim()?G:'#e4e8e7', color:'white', fontSize:'15px', fontWeight:'700', cursor:raw.trim()?'pointer':'default', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>Preview Word List →</button>}
-            {step==='confirm'&& <button onClick={generate} style={{ width:'100%', padding:'14px', borderRadius:'14px', border:'none', background:G, color:'white', fontSize:'15px', fontWeight:'700', cursor:'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>✨ Generate with AI →</button>}
-            {step==='review' && (
+            {step==='paste'   && <button onClick={confirm} style={{ width:'100%', padding:'14px', borderRadius:'14px', border:'none', background:raw.trim()?G:'#e4e8e7', color:'white', fontSize:'15px', fontWeight:'700', cursor:raw.trim()?'pointer':'default', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>Preview Word List →</button>}
+            {step==='confirm' && <button onClick={generate} style={{ width:'100%', padding:'14px', borderRadius:'14px', border:'none', background:G, color:'white', fontSize:'15px', fontWeight:'700', cursor:'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>✨ Generate with AI →</button>}
+            {step==='review'  && (
               <div style={{ display:'flex', gap:'10px' }}>
                 <button onClick={()=>setStep('paste')} style={{ flex:1, padding:'13px', borderRadius:'12px', border:'1.5px solid #e4e8e7', background:'white', color:'#64748b', fontSize:'14px', fontWeight:'600', cursor:'pointer' }}>Start over</button>
                 <button onClick={saveAll} disabled={saving} style={{ flex:2, padding:'13px', borderRadius:'12px', border:'none', background:saving?'#c4cdd6':G, color:'white', fontSize:'14px', fontWeight:'700', cursor:saving?'default':'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>
@@ -428,15 +658,15 @@ function ImportModal({ level, lessonOrder, existingCount, onClose, onSaved }) {
 
 // ── MAIN VOCAB ADMIN ───────────────────────────────────────────────────────────
 export default function VocabAdmin() {
-  const [levels,        setLevels]        = useState([])
-  const [selectedLevel, setSelectedLevel] = useState('')
-  const [lessons,       setLessons]       = useState([])
-  const [wordCounts,    setWordCounts]    = useState({})   // lesson_order → count
-  const [selectedLesson,setSelectedLesson]= useState(null)
-  const [words,         setWords]         = useState([])
-  const [loading,       setLoading]       = useState(false)
-  const [showImport,    setShowImport]    = useState(false)
-  const [editWord,      setEditWord]      = useState(null)
+  const [levels,         setLevels]         = useState([])
+  const [selectedLevel,  setSelectedLevel]  = useState('')
+  const [lessons,        setLessons]        = useState([])
+  const [wordCounts,     setWordCounts]     = useState({})
+  const [selectedLesson, setSelectedLesson] = useState(null)
+  const [words,          setWords]          = useState([])
+  const [loading,        setLoading]        = useState(false)
+  const [showImport,     setShowImport]     = useState(false)
+  const [editWord,       setEditWord]       = useState(null)
 
   useEffect(() => {
     supabase.from('level_lessons').select('level').order('level').then(({ data }) => {
@@ -454,10 +684,10 @@ export default function VocabAdmin() {
         .not('lesson_name','ilike','%Mid-Term%').not('lesson_name','ilike','%Final%')
         .order('lesson_order'),
       supabase.from('vocabulary_words').select('lesson_order').eq('level',selectedLevel)
-    ]).then(([{ data: ls }, { data: ws }]) => {
+    ]).then(([{ data:ls },{ data:ws }]) => {
       setLessons(ls||[])
-      const counts = {}
-      for (const w of (ws||[])) counts[w.lesson_order] = (counts[w.lesson_order]||0) + 1
+      const counts={}
+      for(const w of(ws||[])) counts[w.lesson_order]=(counts[w.lesson_order]||0)+1
       setWordCounts(counts)
     })
   }, [selectedLevel])
@@ -467,41 +697,39 @@ export default function VocabAdmin() {
   const fetchWords = async () => {
     setLoading(true)
     const { data } = await supabase.from('vocabulary_words').select('*')
-      .eq('level', selectedLevel).eq('lesson_order', selectedLesson.lesson_order)
+      .eq('level',selectedLevel).eq('lesson_order',selectedLesson.lesson_order)
       .order('word_order')
     setWords(data||[])
-    // refresh count badge too
-    setWordCounts(prev => ({ ...prev, [selectedLesson.lesson_order]: (data||[]).length }))
+    setWordCounts(prev=>({...prev,[selectedLesson.lesson_order]:(data||[]).length}))
     setLoading(false)
   }
 
   const deleteWord = async (id) => {
     if (!confirm('Delete this word?')) return
-    await supabase.from('vocabulary_words').delete().eq('id', id)
+    await supabase.from('vocabulary_words').delete().eq('id',id)
     fetchWords()
   }
 
-  const totalWords = Object.values(wordCounts).reduce((a,b)=>a+b,0)
+  const totalWords     = Object.values(wordCounts).reduce((a,b)=>a+b,0)
   const coveredLessons = Object.values(wordCounts).filter(c=>c>0).length
 
   return (
     <div style={{ fontFamily:"'DM Sans',sans-serif" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700;800&family=DM+Sans:wght@400;500;600;700&display=swap');
-        .level-tab:hover { opacity:.85 }
-        .lesson-card:hover { border-color:${G}!important; box-shadow:0 4px 16px rgba(0,148,114,.13)!important; }
-        .word-row:hover { background:#f8fafb!important; }
-        .lesson-card { transition: border-color .15s, box-shadow .15s; }
-        .word-row    { transition: background .12s; }
+        .level-tab:hover{opacity:.85}
+        .lesson-card:hover{border-color:${G}!important;box-shadow:0 4px 16px rgba(0,148,114,.13)!important;}
+        .word-row:hover{background:#f8fafb!important;}
+        .lesson-card,.word-row{transition:all .15s;}
       `}</style>
 
-      {/* ── STATS BAR ── */}
+      {/* Stats */}
       {selectedLevel && (
         <div style={{ display:'flex', gap:'12px', marginBottom:'24px', flexWrap:'wrap' }}>
           {[
-            { label:'Total Words', value: totalWords, icon:'📚', color:G },
-            { label:'Lessons Covered', value:`${coveredLessons} / ${lessons.length}`, icon:'✅', color:'#6366f1' },
-            { label:'Level', value: selectedLevel, icon:'🎓', color:'#f59e0b' },
+            { label:'Total Words',     value:totalWords,                       icon:'📚', color:G },
+            { label:'Lessons Covered', value:`${coveredLessons}/${lessons.length}`, icon:'✅', color:'#6366f1' },
+            { label:'Level',           value:selectedLevel,                    icon:'🎓', color:'#f59e0b' },
           ].map(s => (
             <div key={s.label} style={{ flex:1, minWidth:'140px', background:'white', borderRadius:'14px', padding:'14px 18px', border:'1px solid #f0f2f1', boxShadow:'0 1px 6px rgba(0,0,0,0.05)', display:'flex', alignItems:'center', gap:'12px' }}>
               <span style={{ fontSize:'22px' }}>{s.icon}</span>
@@ -514,7 +742,7 @@ export default function VocabAdmin() {
         </div>
       )}
 
-      {/* ── LEVEL TABS ── */}
+      {/* Level tabs */}
       <div style={{ display:'flex', gap:'8px', marginBottom:'24px', overflowX:'auto', paddingBottom:'4px' }}>
         {levels.map(l => {
           const active = l === selectedLevel
@@ -527,7 +755,7 @@ export default function VocabAdmin() {
         })}
       </div>
 
-      {/* ── LESSON GRID ── */}
+      {/* Lesson grid */}
       {!selectedLesson && lessons.length > 0 && (
         <div>
           <div style={{ fontSize:'12px', fontWeight:'700', color:'#94a3b8', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:'12px' }}>Select a lesson</div>
@@ -540,7 +768,7 @@ export default function VocabAdmin() {
                   style={{ background:'white', borderRadius:'14px', padding:'16px', border:`2px solid ${done?`${G}30`:'#f0f2f1'}`, cursor:'pointer', boxShadow:'0 1px 6px rgba(0,0,0,0.05)' }}>
                   <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'10px' }}>
                     <span style={{ fontSize:'11px', fontWeight:'700', color:done?G:'#94a3b8', background:done?`${G}12`:'#f0f2f1', padding:'3px 8px', borderRadius:'6px' }}>
-                      {done ? `${count} words` : 'Empty'}
+                      {done?`${count} words`:'Empty'}
                     </span>
                     <span style={{ fontSize:'16px' }}>{done?'📗':'📄'}</span>
                   </div>
@@ -553,12 +781,11 @@ export default function VocabAdmin() {
         </div>
       )}
 
-      {/* ── SELECTED LESSON: WORD LIST ── */}
+      {/* Selected lesson word list */}
       {selectedLesson && (
         <div>
-          {/* Header */}
           <div style={{ display:'flex', alignItems:'center', gap:'12px', marginBottom:'20px' }}>
-            <button onClick={()=>{ setSelectedLesson(null); setWords([]) }}
+            <button onClick={()=>{setSelectedLesson(null);setWords([])}}
               style={{ width:'34px', height:'34px', borderRadius:'10px', border:'1.5px solid #e4e8e7', background:'white', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', color:'#64748b', flexShrink:0 }}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
             </button>
@@ -573,32 +800,14 @@ export default function VocabAdmin() {
             </button>
           </div>
 
-          {/* Progress bar */}
-          {words.length > 0 && (
-            <div style={{ background:'white', borderRadius:'14px', padding:'14px 18px', marginBottom:'16px', border:'1px solid #f0f2f1', display:'flex', alignItems:'center', gap:'16px' }}>
-              <div style={{ flex:1 }}>
-                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'6px' }}>
-                  <span style={{ fontSize:'12px', fontWeight:'700', color:D }}>{words.length} words</span>
-                  <span style={{ fontSize:'12px', color:'#94a3b8' }}>{words.filter(w=>w.picture_url).length} with images</span>
-                </div>
-                <div style={{ height:'6px', borderRadius:'6px', background:'#f0f2f1', overflow:'hidden' }}>
-                  <div style={{ height:'100%', borderRadius:'6px', background:G, width:`${(words.filter(w=>w.picture_url).length/words.length)*100}%`, transition:'width .4s' }} />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Word list */}
           {loading ? (
-            <div style={{ textAlign:'center', padding:'60px', color:'#94a3b8' }}>
-              <div style={{ fontSize:'32px', marginBottom:'8px' }}>⏳</div>Loading words…
-            </div>
+            <div style={{ textAlign:'center', padding:'60px', color:'#94a3b8' }}>Loading words…</div>
           ) : words.length === 0 ? (
             <div style={{ textAlign:'center', padding:'70px 24px', background:'white', borderRadius:'16px', border:'2px dashed #e4e8e7' }}>
               <div style={{ fontSize:'40px', marginBottom:'12px' }}>📝</div>
               <div style={{ fontSize:'16px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>No words yet</div>
-              <div style={{ fontSize:'13px', color:'#94a3b8', marginTop:'6px', marginBottom:'20px' }}>Paste a word list and let AI do the heavy lifting.</div>
-              <button onClick={()=>setShowImport(true)} style={{ padding:'11px 24px', borderRadius:'12px', border:'none', background:G, color:'white', fontSize:'14px', fontWeight:'700', cursor:'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif", boxShadow:`0 3px 12px ${G}40` }}>
+              <div style={{ fontSize:'13px', color:'#94a3b8', marginTop:'6px', marginBottom:'20px' }}>Import words and let AI generate definitions and translations.</div>
+              <button onClick={()=>setShowImport(true)} style={{ padding:'11px 24px', borderRadius:'12px', border:'none', background:G, color:'white', fontSize:'14px', fontWeight:'700', cursor:'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>
                 + Import Words
               </button>
             </div>
@@ -611,12 +820,17 @@ export default function VocabAdmin() {
                     style={{ background:'white', borderRadius:'12px', padding:'12px 16px', display:'flex', alignItems:'center', gap:'12px', border:'1px solid #f0f2f1' }}>
                     <span style={{ fontSize:'11px', fontWeight:'700', color:'#cbd5e1', minWidth:'22px', textAlign:'right' }}>{i+1}</span>
                     <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ fontSize:'14px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>{w.word}</div>
-                      <div style={{ fontSize:'12px', color:'#64748b', marginTop:'1px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{w.definition}</div>
+                      <div style={{ display:'flex', alignItems:'center', gap:'4px', marginBottom:'2px' }}>
+                        <div style={{ fontSize:'14px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>{w.word}</div>
+                        {w.part_of_speech && <PosBadge pos={w.part_of_speech} />}
+                      </div>
+                      <div style={{ fontSize:'12px', color:'#64748b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                        {w.definition || (w.translation_uz ? `🇺🇿 ${w.translation_uz}` : '')}
+                      </div>
                     </div>
                     {hasImages
                       ? <div style={{ display:'flex', gap:'3px', alignItems:'center', flexShrink:0 }}>
-                          {[w.picture_url, w.picture_url_2, w.picture_url_3, w.picture_url_4].map((u,j) => (
+                          {[w.picture_url,w.picture_url_2,w.picture_url_3,w.picture_url_4].map((u,j) => (
                             <img key={j} src={u} alt="" style={{ width:'24px', height:'24px', borderRadius:'5px', objectFit:'cover', border:`1px solid ${j===0?G:'#e4e8e7'}` }} />
                           ))}
                         </div>
@@ -632,14 +846,13 @@ export default function VocabAdmin() {
         </div>
       )}
 
-      {/* Modals */}
       {showImport && (
         <ImportModal level={selectedLevel} lessonOrder={selectedLesson.lesson_order} existingCount={words.length}
-          onClose={()=>setShowImport(false)} onSaved={()=>{ setShowImport(false); fetchWords() }} />
+          onClose={()=>setShowImport(false)} onSaved={()=>{setShowImport(false);fetchWords()}} />
       )}
       {editWord && (
         <EditWordModal word={editWord} level={selectedLevel} lessonOrder={selectedLesson?.lesson_order}
-          onClose={()=>setEditWord(null)} onSaved={()=>{ setEditWord(null); fetchWords() }} />
+          onClose={()=>setEditWord(null)} onSaved={()=>{setEditWord(null);fetchWords()}} />
       )}
     </div>
   )
