@@ -8,6 +8,7 @@ import VocabAdmin from './VocabAdmin'
 import EssayImageAdmin from './EssayImageAdmin'
 import GroupsSection from './GroupsSection'
 import ProgressTestAdmin from './ProgressTestAdmin'
+import LibraryAdmin from './LibraryAdmin'
 import ManagerApp from './ManagerApp'
 
 const G = '#009472'
@@ -110,12 +111,13 @@ const EDU_NAV = [
   { id:'vocab',    label:'Vocabulary Recap', icon:<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg> },
   { id:'hw',       label:'Essay Images',     icon:<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg> },
   { id:'progress', label:'Progress Tests',   icon:<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> },
+  { id:'library',  label:'Library',         icon:<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg> },
 ]
 
 const TITLES = {
   students:'Students', payments:'Payments', tests:'Placement Tests',
   parents:'Parents',   teachers:'Teachers', groups:'Groups',
-  vocab:'Vocabulary Recap', hw:'Essay Images', progress:'Progress Tests',
+  vocab:'Vocabulary Recap', hw:'Essay Images', progress:'Progress Tests', library:'Library',
 }
 
 function AppShell({ nav, section, setSection, brand, username, children, onLogout }) {
@@ -198,6 +200,7 @@ function EducationApp({ onLogout }) {
       {section === 'vocab'    && <VocabAdmin />}
       {section === 'hw'       && <EssayImageAdmin />}
       {section === 'progress' && <ProgressTestAdmin />}
+      {section === 'library'  && <LibraryAdmin />}
     </AppShell>
   )
 }
