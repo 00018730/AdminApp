@@ -12,6 +12,7 @@ const CATEGORY_META = {
   'Fruits':        { icon:'🍎' }, 'Vegetables':    { icon:'🥕' },
   'Family':        { icon:'👨‍👩‍👧' }, 'Names':         { icon:'🔤' },
   'Capitals':      { icon:'🏛️' },
+  'Irregular Verbs':{ icon:'🔀' },
 }
 
 const lbl = { fontSize:'11px', fontWeight:'700', color:'#64748b', textTransform:'uppercase', letterSpacing:'0.05em', display:'block', marginBottom:'6px' }
