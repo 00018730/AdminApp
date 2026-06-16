@@ -66,7 +66,7 @@ async function aiTranslate(word) {
       'anthropic-dangerous-direct-browser-access': 'true',
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 80,
       system: 'You are a translator. Reply ONLY with a JSON object, no markdown, no explanation.',
       messages: [{
@@ -86,7 +86,7 @@ async function aiGenerateSentence(word, apiKey) {
     method: 'POST',
     headers: { 'Content-Type':'application/json', 'x-api-key':apiKey, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true' },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514', max_tokens: 80,
+      model: 'claude-sonnet-4-6', max_tokens: 80,
       system: 'Generate one short natural example sentence (max 12 words) for an English vocabulary word. Reply with ONLY the sentence.',
       messages: [{ role:'user', content:`Word: "${word}"` }]
     })
@@ -101,7 +101,7 @@ async function aiGenerateScramble(word, apiKey) {
     method: 'POST',
     headers: { 'Content-Type':'application/json', 'x-api-key':apiKey, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true' },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514', max_tokens: 80,
+      model: 'claude-sonnet-4-6', max_tokens: 80,
       system: 'Generate one very simple short sentence (5-8 words, A1/A2 level English, suitable for absolute beginners) that uses the given word. Reply with ONLY the sentence, no punctuation except a period at the end.',
       messages: [{ role:'user', content:`Word: "${word}"` }]
     })
