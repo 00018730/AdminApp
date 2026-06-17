@@ -8,7 +8,7 @@ const BATCH = 8
 const lbl = { fontSize:'11px', fontWeight:'700', color:'#64748b', textTransform:'uppercase', letterSpacing:'0.05em', display:'block', marginBottom:'6px' }
 const inp = { width:'100%', padding:'11px 14px', borderRadius:'10px', border:'1.5px solid #e4e8e7', fontSize:'14px', outline:'none', color:D, fontFamily:"'DM Sans',sans-serif", boxSizing:'border-box' }
 
-const POS_OPTIONS = ['noun','verb','adjective','adverb','phrase','preposition','conjunction','pronoun']
+const POS_OPTIONS = ['noun','verb','adjective','adverb','phrase','preposition','conjunction','pronoun', 'question word', 'phrasal verb', 'compound noun', 'compound adjective', 'adjective + preposition', 'verb + preposition', 'noun + preposition', 'collocation', 'idiomatic expression']
 const POS_COLORS  = {
   verb:       { bg:'#dbeafe', color:'#1d4ed8' },
   noun:       { bg:'#dcfce7', color:'#15803d' },
@@ -18,6 +18,15 @@ const POS_COLORS  = {
   preposition:{ bg:'#fce7f3', color:'#be185d' },
   conjunction:{ bg:'#f0fdf4', color:'#166534' },
   pronoun:    { bg:'#f0f9ff', color:'#0369a1' },
+  'question word':            { bg: '#fee2e2', color: '#b91c1c' }, // red
+'phrasal verb':              { bg: '#ccfbf1', color: '#0f766e' }, // teal
+'compound noun':             { bg: '#e0e7ff', color: '#4338ca' }, // indigo
+'compound adjective':        { bg: '#f5f5f4', color: '#57534e' }, // stone
+'adjective + preposition':   { bg: '#ecfccb', color: '#4d7c0f' }, // lime
+'verb + preposition':        { bg: '#cffafe', color: '#0e7490' }, // cyan
+'noun + preposition':        { bg: '#fae8ff', color: '#a21caf' }, // fuchsia
+collocation:                 { bg: '#fef3c7', color: '#b45309' }, // amber
+'idiomatic expression':      { bg: '#ffe4e6', color: '#be123c' }, // rose
 }
 
 function PosBadge({ pos }) {
