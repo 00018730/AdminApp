@@ -265,7 +265,7 @@ function TeacherGrid({ teacher, groups, studentCounts, onCreateSlot, onSelectGro
   )
 }
 
-export default function GroupsSection({ readOnly = false, onNavigate = null }) {
+export default function GroupsSection({ readOnly = false, onNavigate = null, onOpenStudents = null }) {
   const [teachers,      setTeachers]      = useState([])
   const [groups,        setGroups]        = useState([])
   const [studentCounts, setStudentCounts] = useState({})
@@ -367,16 +367,16 @@ export default function GroupsSection({ readOnly = false, onNavigate = null }) {
             </p>
 
             <div style={{ display:'flex', flexDirection:'column', gap:'10px' }}>
-              {/* Add student link — admin only */}
+              {/* Students — admin only. Opens this group's student list (add / edit / transfer / delete). */}
               {!readOnly && (
-                <div onClick={() => { setSelectedGroup(null); onNavigate?.('students') }}
+                <div onClick={() => { const g = selectedGroup; setSelectedGroup(null); onOpenStudents?.(g) }}
                   style={{ display:'flex', alignItems:'center', gap:'14px', padding:'16px', borderRadius:'14px', border:`1.5px solid ${G}`, background:`${G}08`, cursor:'pointer' }}>
                   <div style={{ width:'40px', height:'40px', borderRadius:'12px', background:`${G}20`, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={G} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={G} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
                   </div>
                   <div>
-                    <div style={{ fontSize:'15px', fontWeight:'700', color:G, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>Add a Student</div>
-                    <div style={{ fontSize:'12px', color:'#94a3b8', marginTop:'2px' }}>Enrol a new student into this group</div>
+                    <div style={{ fontSize:'15px', fontWeight:'700', color:G, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>Students</div>
+                    <div style={{ fontSize:'12px', color:'#94a3b8', marginTop:'2px' }}>View, add and edit students in this group</div>
                   </div>
                 </div>
               )}

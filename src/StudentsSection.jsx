@@ -272,18 +272,24 @@ function EditStudentModal({ student, group, onClose, onSaved }) {
 
 // readOnly = true  → manager: can navigate, search, view students, no add/edit buttons
 // readOnly = false → admin: full access
-export default function StudentsSection({ readOnly = false }) {
-  const [view,            setView]           = useState('teachers')
+export default function StudentsSection({ readOnly = false, initialGroup = null, onExit = null }) {
+  // When initialGroup is provided (admin opened "Students" from a specific group),
+  // skip the teacher → group navigation and jump straight to that group's students.
+  const lockedToGroup = !!initialGroup
+  const [view,            setView]           = useState(initialGroup ? 'students' : 'teachers')
   const [teachers,        setTeachers]       = useState([])
   const [selectedTeacher, setSelectedTeacher]= useState(null)
   const [groups,          setGroups]         = useState([])
-  const [selectedGroup,   setSelectedGroup]  = useState(null)
+  const [selectedGroup,   setSelectedGroup]  = useState(initialGroup)
   const [students,        setStudents]       = useState([])
   const [loading,         setLoading]        = useState(true)
   const [addOpen,         setAddOpen]        = useState(false)
   const [editStudent,     setEditStudent]    = useState(null)
 
-  useEffect(() => { fetchTeachers() }, [])
+  useEffect(() => {
+    if (initialGroup) fetchStudents(initialGroup)
+    else fetchTeachers()
+  }, [])
 
   const fetchTeachers = async () => {
     setLoading(true)
@@ -314,7 +320,10 @@ export default function StudentsSection({ readOnly = false }) {
   const goToTeacher = (t) => { setSelectedTeacher(t); fetchGroups(t); setView('groups') }
   const goToGroup   = (g) => { setSelectedGroup(g); fetchStudents(g); setView('students') }
   const goBack = () => {
-    if (view==='students') { setView('groups'); setSelectedGroup(null); fetchGroups(selectedTeacher) }
+    if (view==='students') {
+      if (lockedToGroup) { onExit?.(); return }
+      setView('groups'); setSelectedGroup(null); fetchGroups(selectedTeacher)
+    }
     if (view==='groups')   { setView('teachers'); setSelectedTeacher(null); fetchTeachers() }
   }
 
@@ -379,7 +388,7 @@ export default function StudentsSection({ readOnly = false }) {
 
   if (view === 'students') return (
     <div style={{ fontFamily:"'DM Sans',sans-serif" }}>
-      <Back label={selectedTeacher?.full_name} onClick={goBack} />
+      <Back label={lockedToGroup ? 'Groups' : selectedTeacher?.full_name} onClick={goBack} />
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'20px', flexWrap:'wrap', gap:'10px' }}>
         <div>
           <h2 style={{ fontSize:'20px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', color:D, marginBottom:'3px' }}>{selectedGroup?.level}</h2>
