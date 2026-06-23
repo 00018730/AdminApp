@@ -475,13 +475,9 @@ function AdminPaymentModal({ prefill, defaultAmount, students, groups, teachers,
   const [studentU, setStudentU] = useState(initStu?.username || '')
   const [amount,   setAmount]   = useState(defaultAmount != null ? String(defaultAmount) : '')
   const [method,   setMethod]   = useState('Cash')
-  const [payDate,  setPayDate]  = useState(new Date().toISOString().slice(0,10))
-  const [payTime,  setPayTime]  = useState(new Date().toTimeString().slice(0,5))
   const [notes,    setNotes]    = useState('')
   const [saving,   setSaving]   = useState(false)
   const [error,    setError]    = useState('')
-
-  
 
   const teacherGroups = groups.filter(g => g.teacher_username === teacherU)
   const [gDay, gTime] = groupKey.split('|')
@@ -497,11 +493,7 @@ function AdminPaymentModal({ prefill, defaultAmount, students, groups, teachers,
     const payload = {
       student_username: studentU, teacher_username: teacherU || (students.find(s=>s.username===studentU)?.teacher_username),
       amount: amt, method,
-      payment_date: (() => {
-        const [yyyy, mm, dd] = payDate.split('-').map(Number)
-        const [hh, mi]       = payTime.split(':').map(Number)
-        return new Date(yyyy, mm - 1, dd, hh, mi, 0).toISOString()
-      })(),
+      payment_date: new Date().toISOString(),
       notes: notes.trim() || null,
       payment_month: month, payment_year: year,
     }
@@ -569,11 +561,6 @@ function AdminPaymentModal({ prefill, defaultAmount, students, groups, teachers,
           ))}
         </div>
 
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
-          <div><label style={lbl}>Date</label><input type="date" value={payDate} onChange={e=>setPayDate(e.target.value)} style={inpStyle}/></div>
-          <div><label style={lbl}>Time</label><input type="time" value={payTime} onChange={e=>setPayTime(e.target.value)} style={inpStyle}/></div>
-        </div>
-
         <label style={lbl}>Notes (optional)</label>
         <input value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Any additional notes…" style={{ ...inpStyle, marginBottom:error?'10px':'0' }} />
         {error && <div style={{ color:'#ef4444', fontSize:'13px', fontWeight:'600', marginTop:'10px' }}>{error}</div>}
@@ -636,6 +623,12 @@ function UnpaidBucketModal({ title, rows, teachers, onRecord, onClose }) {
               <div style={{ flex:1, minWidth:0 }}>
                 <div style={{ fontSize:'14px', fontWeight:'700', color:DARK, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.student.full_name}</div>
                 <div style={{ fontSize:'11px', color:'#94a3b8' }}>{tName(r.student.teacher_username)} · {dayLabel(r.student.day)} · {r.student.class_time}</div>
+                {r.student.phone && (
+                  <a href={`tel:${r.student.phone}`} style={{ fontSize:'12px', color:G, fontWeight:'700', textDecoration:'none', display:'inline-flex', alignItems:'center', gap:'4px', marginTop:'2px' }}>
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={G} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                    {r.student.phone}
+                  </a>
+                )}
               </div>
               <div style={{ textAlign:'right', flexShrink:0 }}>
                 <div style={{ fontSize:'14px', fontWeight:'800', color:'#ef4444', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>{fmt(r.remaining)}</div>
