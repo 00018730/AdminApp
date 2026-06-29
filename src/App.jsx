@@ -236,7 +236,7 @@ function AdminApp({ session, onLogout }) {
       {section === 'students' && <StudentsSection initialGroup={studentsGroup} onExit={() => { setStudentsGroup(null); setSection('groups') }} />}
       {section === 'payments' && <PaymentsSection role="admin" />}
       {section === 'tests'    && <TestsSection onNavigate={setSection} />}
-      {section === 'parents'  && <ParentsSection />}
+      {section === 'parents'  && <ParentsSection role="admin" />}
       {section === 'teachers' && <TeachersSection />}
     </AppShell>
   )

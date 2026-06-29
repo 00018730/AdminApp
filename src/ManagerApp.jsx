@@ -151,7 +151,7 @@ export default function ManagerApp({ session, onLogout, isCEO = false }) {
           {section === 'holidays'      && <HolidaysSection canDelete={isCEO} />}
           {section === 'requests'      && <RequestsSection canDelete={isCEO} />}
           {section === 'students'      && <StudentsSection canDelete={isCEO} />}
-          {section === 'parents'       && <ParentsSection canDelete={isCEO} />}
+          {section === 'parents'       && <ParentsSection role={isCEO ? 'ceo' : 'manager'} />}
           {section === 'teachers'      && <TeachersSection canDelete={isCEO} />}
           {section === 'books'         && <BooksSection canDelete={isCEO} />}
           {section === 'groups'        && <GroupsSection onNavigate={setSection} canDelete={isCEO} />}
