@@ -1,4 +1,7 @@
+import BooksSection from './BooksSection'
 import { useState } from 'react'
+import { supabase } from './supabase'
+import { logEdit } from './editLog'
 import StudentsSection from './StudentsSection'
 import PaymentsSection from './PaymentsSection'
 import TestsSection from './TestsSection'
@@ -14,11 +17,17 @@ import ManagerApp from './ManagerApp'
 const G = '#009472'
 const D = '#002b2a'
 
-const CREDENTIALS = {
-  admin:     { password: 'admin123',   role: 'admin' },
-  education: { password: 'edu123',     role: 'education' },
-  manager:   { password: 'manager123', role: 'manager' },
-}
+// Login is checked against these tables in order; first match wins and sets the
+// role. Each table has username + password + full_name (see roles_migration.sql).
+const ROLE_TABLES = [
+  { table: 'ceo',       role: 'ceo' },
+  { table: 'managers',  role: 'manager' },
+  { table: 'admins',    role: 'admin' },
+  { table: 'education', role: 'education' },
+]
+
+// logEdit now lives in ./editLog (re-exported for any existing importers).
+export { logEdit }
 
 function Login({ onLogin }) {
   const [username, setUsername] = useState('')
@@ -27,18 +36,24 @@ function Login({ onLogin }) {
   const [loading,  setLoading]  = useState(false)
   const [showPw,   setShowPw]   = useState(false)
 
-  const handle = () => {
+  const handle = async () => {
     if (!username || !password) { setError('Enter username and password.'); return }
-    setLoading(true)
-    setTimeout(() => {
-      const cred = CREDENTIALS[username.toLowerCase()]
-      if (cred && password === cred.password) {
-        onLogin(cred.role)
-      } else {
-        setError('Incorrect username or password.')
-        setLoading(false)
+    setLoading(true); setError('')
+    const uname = username.trim()
+    try {
+      for (const { table, role } of ROLE_TABLES) {
+        const { data } = await supabase.from(table).select('username,password,full_name').eq('username', uname).maybeSingle()
+        if (data && data.password === password) {
+          onLogin({ username: data.username, full_name: data.full_name || data.username, role })
+          return
+        }
       }
-    }, 400)
+      setError('Incorrect username or password.')
+      setLoading(false)
+    } catch (e) {
+      setError('Could not sign in. Check your connection and try again.')
+      setLoading(false)
+    }
   }
 
   return (
@@ -105,6 +120,7 @@ const ADMIN_NAV = [
   { id:'tests',    label:'New Students', icon:<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg> },
   { id:'parents',  label:'Parents',         icon:<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> },
   { id:'teachers', label:'Team',        icon:<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> },
+  { id:'books',    label:'Books',           icon:<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg> },
   { id:'groups',   label:'Groups',          icon:<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg> },
 ]
 
@@ -117,7 +133,7 @@ const EDU_NAV = [
 
 const TITLES = {
   students:'Students', payments:'Payments', tests:'New Students',
-  parents:'Parents',   teachers:'Team', groups:'Groups',
+  parents:'Parents',   teachers:'Team', groups:'Groups', books:'Books',
   vocab:'Vocabulary Recap', hw:'Essay Images', progress:'Progress Tests', library:'Library',
 }
 
@@ -194,10 +210,10 @@ function AppShell({ nav, section, setSection, brand, username, children, onLogou
   )
 }
 
-function EducationApp({ onLogout }) {
+function EducationApp({ session, onLogout }) {
   const [section, setSection] = useState('vocab')
   return (
-    <AppShell nav={EDU_NAV} section={section} setSection={setSection} brand="Education Dept" username="education" onLogout={onLogout}>
+    <AppShell nav={EDU_NAV} section={section} setSection={setSection} brand="Education Dept" username={session?.full_name || 'education'} onLogout={onLogout}>
       {section === 'vocab'    && <VocabAdmin />}
       {section === 'hw'       && <EssayImageAdmin />}
       {section === 'progress' && <ProgressTestAdmin />}
@@ -206,7 +222,7 @@ function EducationApp({ onLogout }) {
   )
 }
 
-function AdminApp({ onLogout }) {
+function AdminApp({ session, onLogout }) {
   // Default landing section is Groups (Students is no longer a top-level item).
   const [section, setSection] = useState('groups')
   // Which group's students we're viewing. Set when the admin taps "Students"
@@ -214,10 +230,11 @@ function AdminApp({ onLogout }) {
   const [studentsGroup, setStudentsGroup] = useState(null)
 
   return (
-    <AppShell nav={ADMIN_NAV} section={section} setSection={setSection} brand="Admin Panel" username="admin" onLogout={onLogout}>
+    <AppShell nav={ADMIN_NAV} section={section} setSection={setSection} brand="Admin Panel" username={session?.full_name || 'admin'} onLogout={onLogout}>
+      {section === 'books'    && <BooksSection />}
       {section === 'groups'   && <GroupsSection onOpenStudents={(g) => { setStudentsGroup(g); setSection('students') }} />}
       {section === 'students' && <StudentsSection initialGroup={studentsGroup} onExit={() => { setStudentsGroup(null); setSection('groups') }} />}
-      {section === 'payments' && <PaymentsSection readOnly />}
+      {section === 'payments' && <PaymentsSection role="admin" />}
       {section === 'tests'    && <TestsSection onNavigate={setSection} />}
       {section === 'parents'  && <ParentsSection />}
       {section === 'teachers' && <TeachersSection />}
@@ -226,12 +243,15 @@ function AdminApp({ onLogout }) {
 }
 
 export default function App() {
-  const [role, setRole] = useState(() => localStorage.getItem('slc_role') || null)
-  const login  = (r) => { localStorage.setItem('slc_role', r); setRole(r) }
-  const logout = ()  => { localStorage.removeItem('slc_role'); setRole(null) }
+  const [session, setSession] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('slc_session') || 'null') } catch { return null }
+  })
+  const login  = (s) => { localStorage.setItem('slc_session', JSON.stringify(s)); setSession(s) }
+  const logout = ()  => { localStorage.removeItem('slc_session'); localStorage.removeItem('slc_role'); setSession(null) }
 
-  if (!role)                return <Login onLogin={login} />
-  if (role === 'education') return <EducationApp onLogout={logout} />
-  if (role === 'manager')   return <ManagerApp   onLogout={logout} />
-  return <AdminApp onLogout={logout} />
+  if (!session)                  return <Login onLogin={login} />
+  if (session.role === 'education') return <EducationApp session={session} onLogout={logout} />
+  if (session.role === 'manager')  return <ManagerApp session={session} onLogout={logout} />
+  if (session.role === 'ceo')      return <ManagerApp session={session} onLogout={logout} isCEO />
+  return <AdminApp session={session} onLogout={logout} />
 }

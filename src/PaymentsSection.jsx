@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from './supabase'
+import { logEdit } from './editLog'
 
 const G    = '#009472'
 const DARK = '#002b2a'
@@ -7,6 +8,15 @@ const MONTHS  = ['January','February','March','April','May','June',
                  'July','August','September','October','November','December']
 const METHODS = ['Cash','Card','Transfer']
 const PRESET_AMOUNTS = [550000, 600000, 650000]
+
+const DISCOUNT_PCTS    = [10, 20, 30, 50]
+const DISCOUNT_REASONS = ['Sibling', 'Scholarship', 'Staff child', 'Other']
+// final amount after a percentage discount, rounded to the nearest so'm
+function applyDiscount(base, pct) {
+  const b = Number(base) || 0
+  if (!pct) return b
+  return Math.round(b * (1 - pct / 100))
+}
 
 function fmt(n) {
   return Number(n).toLocaleString('fr-FR').replace(/\u202f/g,' ')
@@ -43,6 +53,49 @@ const lbl = {
   display:'block', marginBottom:'6px', marginTop:'14px',
 }
 
+// Reusable discount block for both record modals. The parent owns the state
+// (enabled / pct / reason) and the base amount; this renders the controls and
+// shows the resulting amount. Final amount = applyDiscount(base, enabled?pct:0).
+function DiscountControls({ enabled, setEnabled, pct, setPct, reason, setReason, baseAmount }) {
+  const base  = Number(baseAmount) || 0
+  const final = applyDiscount(base, enabled ? pct : 0)
+  return (
+    <div style={{ marginTop:'14px', border:`1.5px solid ${enabled?G:'#e4e8e7'}`, borderRadius:'12px', padding:'12px 14px', background:enabled?`${G}08`:'#fafbfc' }}>
+      <label style={{ display:'flex', alignItems:'center', gap:'10px', cursor:'pointer' }}>
+        <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)}
+          style={{ width:'18px', height:'18px', accentColor:G, cursor:'pointer' }} />
+        <span style={{ fontSize:'13px', fontWeight:'700', color:DARK }}>Apply discount (skidka)</span>
+      </label>
+      {enabled && (
+        <div style={{ marginTop:'12px' }}>
+          <div style={{ fontSize:'10px', fontWeight:'700', color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'6px' }}>Percentage</div>
+          <div style={{ display:'flex', gap:'6px', marginBottom:'10px' }}>
+            {DISCOUNT_PCTS.map(p => (
+              <button key={p} type="button" onClick={() => setPct(p)}
+                style={{ flex:1, padding:'8px 4px', borderRadius:'9px', border:`1.5px solid ${pct===p?G:'#e4e8e7'}`, background:pct===p?G:'white', color:pct===p?'white':DARK, fontSize:'13px', fontWeight:'700', cursor:'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>
+                {p}%
+              </button>
+            ))}
+          </div>
+          <div style={{ fontSize:'10px', fontWeight:'700', color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'6px' }}>Reason</div>
+          <div style={{ display:'flex', gap:'6px', flexWrap:'wrap' }}>
+            {DISCOUNT_REASONS.map(r => (
+              <button key={r} type="button" onClick={() => setReason(r)}
+                style={{ padding:'7px 12px', borderRadius:'9px', border:`1.5px solid ${reason===r?G:'#e4e8e7'}`, background:reason===r?`${G}12`:'white', color:reason===r?G:'#64748b', fontSize:'12px', fontWeight:'700', cursor:'pointer' }}>
+                {r}
+              </button>
+            ))}
+          </div>
+          <div style={{ marginTop:'12px', display:'flex', justifyContent:'space-between', alignItems:'center', fontSize:'13px' }}>
+            <span style={{ color:'#94a3b8', textDecoration:'line-through' }}>{fmt(base)}</span>
+            <span style={{ fontWeight:'800', color:G, fontSize:'16px', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>{fmt(final)} UZS</span>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function PaymentModal({ payment, prefill, allStudents, allGroups, month, year, teachers, onClose, onSaved }) {
   const isEdit = !!payment
   const initStudent  = prefill?.username || payment?.student_username || ''
@@ -58,6 +111,9 @@ function PaymentModal({ payment, prefill, allStudents, allGroups, month, year, t
   const [payDate,  setPayDate]  = useState(isEdit && payment.payment_date ? payment.payment_date.slice(0,10) : new Date().toISOString().slice(0,10))
   const [payTime,  setPayTime]  = useState(isEdit && payment.payment_date ? payment.payment_date.slice(11,16) : new Date().toTimeString().slice(0,5))
   const [notes,    setNotes]    = useState(isEdit ? (payment.notes||'') : '')
+  const [discEnabled, setDiscEnabled] = useState(isEdit ? !!payment.discount_percent : false)
+  const [discPct,     setDiscPct]     = useState(isEdit && payment.discount_percent ? payment.discount_percent : 10)
+  const [discReason,  setDiscReason]  = useState(isEdit ? (payment.discount_reason || '') : '')
   const [saving,   setSaving]   = useState(false)
   const [error,    setError]    = useState('')
 
@@ -75,21 +131,32 @@ function PaymentModal({ payment, prefill, allStudents, allGroups, month, year, t
     if (!studentU) { setError('Select a student.'); return }
     const amt = parseFloat(amount)
     if (!amount || isNaN(amt) || amt < 0) { setError('Enter a valid amount.'); return }
+    if (discEnabled && !discReason) { setError('Choose a discount reason.'); return }
     setSaving(true); setError('')
     const [yyyy, mm, dd] = payDate.split('-').map(Number)
     const [hh, mi]       = payTime.split(':').map(Number)
     const localDt        = new Date(yyyy, mm - 1, dd, hh, mi, 0)
+    const finalAmt = discEnabled ? applyDiscount(amt, discPct) : amt
     const payload = {
       student_username: studentU, teacher_username: teacherU,
-      amount: amt, method,
+      amount: finalAmt, method,
       payment_date: localDt.toISOString(),
       notes: notes.trim() || null,
       payment_month: month, payment_year: year,
+      discount_percent: discEnabled ? discPct : null,
+      discount_reason:  discEnabled ? discReason : null,
     }
     const { error: err } = isEdit
       ? await supabase.from('payments').update(payload).eq('id', payment.id)
       : await supabase.from('payments').insert(payload)
     if (err) { setError(err.message); setSaving(false); return }
+    const stuName = allStudents.find(s => s.username === studentU)?.full_name || studentU
+    const discNote = discEnabled ? ` (${discPct}% ${discReason} discount)` : ''
+    if (isEdit) {
+      logEdit({ action:'update', target_table:'payments', target_id:payment.id, summary:`Edited payment for ${stuName} → ${fmt(finalAmt)} UZS${discNote}` })
+    } else if (discEnabled) {
+      logEdit({ action:'create', target_table:'payments', summary:`Recorded ${fmt(finalAmt)} UZS for ${stuName}${discNote}` })
+    }
     onSaved()
   }
 
@@ -164,6 +231,7 @@ function PaymentModal({ payment, prefill, allStudents, allGroups, month, year, t
 
         <label style={lbl}>Notes (optional)</label>
         <input value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Any additional notes…" style={{ ...inpStyle, marginBottom:error?'10px':'0' }} />
+        <DiscountControls enabled={discEnabled} setEnabled={setDiscEnabled} pct={discPct} setPct={setDiscPct} reason={discReason} setReason={setDiscReason} baseAmount={amount} />
         {error && <div style={{ color:'#ef4444', fontSize:'13px', fontWeight:'600', marginTop:'10px' }}>{error}</div>}
 
         <div style={{ display:'flex', gap:'12px', marginTop:'20px' }}>
@@ -223,7 +291,7 @@ function UnpaidModal({ students, onRecordPayment, onClose, readOnly }) {
 // MANAGER PAYMENTS — unchanged monthly view (full access). Admin uses the new
 // daily design below; this preserves the manager experience exactly as before.
 // ════════════════════════════════════════════════════════════════════════════
-function ManagerPayments({ readOnly = false }) {
+function ManagerPayments({ readOnly = false, canDelete = false }) {
   const now = new Date()
   const [month,        setMonth]       = useState(now.getMonth() + 1)
   const [year,         setYear]        = useState(now.getFullYear())
@@ -256,7 +324,10 @@ function ManagerPayments({ readOnly = false }) {
   const deletePayment = async (id) => {
     if (!confirm('Delete this payment record?')) return
     setDeleting(id)
+    const p = payments.find(x => x.id === id)
+    const stuName = allStudents.find(s => s.username === p?.student_username)?.full_name || p?.student_username || ''
     await supabase.from('payments').delete().eq('id', id)
+    logEdit({ action:'delete', target_table:'payments', target_id:id, summary:`Deleted payment for ${stuName} (${fmt(p?.amount||0)} UZS)` })
     setDeleting(null); fetchAll()
   }
 
@@ -368,17 +439,19 @@ function ManagerPayments({ readOnly = false }) {
               <div style={{ padding:'14px 16px', fontSize:'14px', fontWeight:'800', color:Number(p.amount)>0?G:'#94a3b8', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>{fmt(p.amount)} UZS</div>
               <div style={{ padding:'14px 16px', fontSize:'13px', color:'#64748b', fontWeight:'600' }}>{p.method||'—'}</div>
               <div style={{ padding:'14px 16px', fontSize:'12px', color:'#64748b', fontFamily:'monospace' }}>{fmtDateTime(p.payment_date)}</div>
-              {/* Edit/Delete — manager only */}
+              {/* Edit — manager + CEO. Delete — CEO only. */}
               {!readOnly && (
                 <div style={{ padding:'14px 16px', display:'flex', alignItems:'center', gap:'8px' }}>
                   <button onClick={() => { setPrefill(null); setModal(p) }}
                     style={{ padding:'6px 12px', borderRadius:'8px', border:'1.5px solid #e4e8e7', background:'white', color:DARK, fontSize:'12px', fontWeight:'700', cursor:'pointer' }}>
                     Edit
                   </button>
-                  <button onClick={() => deletePayment(p.id)} disabled={deleting===p.id}
-                    style={{ width:'28px', height:'28px', borderRadius:'8px', border:'1.5px solid #fde8e8', background:'white', color:'#ef4444', fontSize:'16px', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:'800' }}>
-                    {deleting===p.id?'…':'×'}
-                  </button>
+                  {canDelete && (
+                    <button onClick={() => deletePayment(p.id)} disabled={deleting===p.id}
+                      style={{ width:'28px', height:'28px', borderRadius:'8px', border:'1.5px solid #fde8e8', background:'white', color:'#ef4444', fontSize:'16px', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:'800' }}>
+                      {deleting===p.id?'…':'×'}
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -476,6 +549,9 @@ function AdminPaymentModal({ prefill, defaultAmount, students, groups, teachers,
   const [amount,   setAmount]   = useState(defaultAmount != null ? String(defaultAmount) : '')
   const [method,   setMethod]   = useState('Cash')
   const [notes,    setNotes]    = useState('')
+  const [discEnabled, setDiscEnabled] = useState(false)
+  const [discPct,     setDiscPct]     = useState(10)
+  const [discReason,  setDiscReason]  = useState('')
   const [saving,   setSaving]   = useState(false)
   const [error,    setError]    = useState('')
 
@@ -489,16 +565,24 @@ function AdminPaymentModal({ prefill, defaultAmount, students, groups, teachers,
     if (!studentU) { setError('Select a student.'); return }
     const amt = parseFloat(amount)
     if (!amount || isNaN(amt) || amt <= 0) { setError('Enter a valid amount.'); return }
+    if (discEnabled && !discReason) { setError('Choose a discount reason.'); return }
     setSaving(true); setError('')
+    const finalAmt = discEnabled ? applyDiscount(amt, discPct) : amt
     const payload = {
       student_username: studentU, teacher_username: teacherU || (students.find(s=>s.username===studentU)?.teacher_username),
-      amount: amt, method,
+      amount: finalAmt, method,
       payment_date: new Date().toISOString(),
       notes: notes.trim() || null,
       payment_month: month, payment_year: year,
+      discount_percent: discEnabled ? discPct : null,
+      discount_reason:  discEnabled ? discReason : null,
     }
     const { error: err } = await supabase.from('payments').insert(payload)
     if (err) { setError(err.message); setSaving(false); return }
+    if (discEnabled) {
+      const stuName = students.find(s => s.username === studentU)?.full_name || studentU
+      logEdit({ action:'create', target_table:'payments', summary:`Recorded ${fmt(finalAmt)} UZS for ${stuName} (${discPct}% ${discReason} discount)` })
+    }
     onSaved()
   }
 
@@ -563,6 +647,7 @@ function AdminPaymentModal({ prefill, defaultAmount, students, groups, teachers,
 
         <label style={lbl}>Notes (optional)</label>
         <input value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Any additional notes…" style={{ ...inpStyle, marginBottom:error?'10px':'0' }} />
+        <DiscountControls enabled={discEnabled} setEnabled={setDiscEnabled} pct={discPct} setPct={setDiscPct} reason={discReason} setReason={setDiscReason} baseAmount={amount} />
         {error && <div style={{ color:'#ef4444', fontSize:'13px', fontWeight:'600', marginTop:'10px' }}>{error}</div>}
 
         <div style={{ display:'flex', gap:'12px', marginTop:'20px' }}>
@@ -762,12 +847,19 @@ function AdminPayments() {
 
   // paid-this-month per student (partial payments accumulate)
   const paidByStudent = {}
-  payments.forEach(p => { paidByStudent[p.student_username] = (paidByStudent[p.student_username]||0) + Number(p.amount||0) })
+  const discountByStudent = {}   // max discount % applied to this student this month
+  payments.forEach(p => {
+    paidByStudent[p.student_username] = (paidByStudent[p.student_username]||0) + Number(p.amount||0)
+    const pct = Number(p.discount_percent || 0)
+    if (pct > (discountByStudent[p.student_username] || 0)) discountByStudent[p.student_username] = pct
+  })
 
-  // unpaid buckets
+  // unpaid buckets — a discount lowers what the student OWES this month, so a
+  // discounted full payment (e.g. 630k on a 700k base) counts as fully paid.
   const active = students.filter(s => s.status === 'active')
   const buildRow = s => {
-    const owed = owedThisMonth(s, month, year, holidays)
+    const baseOwed = owedThisMonth(s, month, year, holidays)
+    const owed = applyDiscount(baseOwed, discountByStudent[s.username] || 0)
     const paid = paidByStudent[s.username] || 0
     return { student:s, owed, paid, remaining: Math.max(owed - paid, 0) }
   }
@@ -889,7 +981,13 @@ function AdminPayments() {
   )
 }
 
-// Admin → new daily design. Manager → existing monthly view (unchanged).
-export default function PaymentsSection({ readOnly = false }) {
-  return readOnly ? <AdminPayments /> : <ManagerPayments readOnly={readOnly} />
+// Role-driven:
+//  • admin   → daily record-only view (AdminPayments), can record + discount
+//  • manager → monthly view with edit (no delete)
+//  • ceo     → monthly view with edit + delete
+// Back-compat: a bare `readOnly` still maps to the admin view.
+export default function PaymentsSection({ role, readOnly = false, canDelete = false }) {
+  const r = role || (readOnly ? 'admin' : 'manager')
+  if (r === 'admin') return <AdminPayments />
+  return <ManagerPayments readOnly={false} canDelete={r === 'ceo' || canDelete} />
 }
