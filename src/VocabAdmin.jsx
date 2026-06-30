@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from './supabase'
+import { autoFetchImagesForWord } from './vocabImages'
 
 const G  = '#009472'
 const D  = '#002b2a'
@@ -8,7 +9,7 @@ const BATCH = 8
 const lbl = { fontSize:'11px', fontWeight:'700', color:'#64748b', textTransform:'uppercase', letterSpacing:'0.05em', display:'block', marginBottom:'6px' }
 const inp = { width:'100%', padding:'11px 14px', borderRadius:'10px', border:'1.5px solid #e4e8e7', fontSize:'14px', outline:'none', color:D, fontFamily:"'DM Sans',sans-serif", boxSizing:'border-box' }
 
-const POS_OPTIONS = ['noun','verb','adjective','adverb','phrase','preposition','conjunction','pronoun', 'question word', 'phrasal verb', 'compound noun', 'compound adjective', 'adjective + preposition', 'verb + preposition', 'noun + preposition', 'collocation', 'idiomatic expression']
+const POS_OPTIONS = ['noun','verb','adjective','adverb','phrase','preposition','conjunction','pronoun']
 const POS_COLORS  = {
   verb:       { bg:'#dbeafe', color:'#1d4ed8' },
   noun:       { bg:'#dcfce7', color:'#15803d' },
@@ -18,15 +19,6 @@ const POS_COLORS  = {
   preposition:{ bg:'#fce7f3', color:'#be185d' },
   conjunction:{ bg:'#f0fdf4', color:'#166534' },
   pronoun:    { bg:'#f0f9ff', color:'#0369a1' },
-  'question word':            { bg: '#fee2e2', color: '#b91c1c' }, // red
-'phrasal verb':              { bg: '#ccfbf1', color: '#0f766e' }, // teal
-'compound noun':             { bg: '#e0e7ff', color: '#4338ca' }, // indigo
-'compound adjective':        { bg: '#f5f5f4', color: '#57534e' }, // stone
-'adjective + preposition':   { bg: '#ecfccb', color: '#4d7c0f' }, // lime
-'verb + preposition':        { bg: '#cffafe', color: '#0e7490' }, // cyan
-'noun + preposition':        { bg: '#fae8ff', color: '#a21caf' }, // fuchsia
-collocation:                 { bg: '#fef3c7', color: '#b45309' }, // amber
-'idiomatic expression':      { bg: '#ffe4e6', color: '#be123c' }, // rose
 }
 
 function PosBadge({ pos }) {
@@ -75,7 +67,7 @@ async function aiTranslate(word) {
       'anthropic-dangerous-direct-browser-access': 'true',
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
+      model: 'claude-sonnet-4-20250514',
       max_tokens: 80,
       system: 'You are a translator. Reply ONLY with a JSON object, no markdown, no explanation.',
       messages: [{
@@ -95,7 +87,7 @@ async function aiGenerateSentence(word, apiKey) {
     method: 'POST',
     headers: { 'Content-Type':'application/json', 'x-api-key':apiKey, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true' },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-6', max_tokens: 80,
+      model: 'claude-sonnet-4-20250514', max_tokens: 80,
       system: 'Generate one short natural example sentence (max 12 words) for an English vocabulary word. Reply with ONLY the sentence.',
       messages: [{ role:'user', content:`Word: "${word}"` }]
     })
@@ -110,7 +102,7 @@ async function aiGenerateScramble(word, apiKey) {
     method: 'POST',
     headers: { 'Content-Type':'application/json', 'x-api-key':apiKey, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true' },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-6', max_tokens: 80,
+      model: 'claude-sonnet-4-20250514', max_tokens: 80,
       system: 'Generate one very simple short sentence (5-8 words, A1/A2 level English, suitable for absolute beginners) that uses the given word. Reply with ONLY the sentence, no punctuation except a period at the end.',
       messages: [{ role:'user', content:`Word: "${word}"` }]
     })
@@ -175,6 +167,9 @@ function EditWordModal({ word, level, lessonOrder, onClose, onSaved }) {
   const [imgFiles,         setImgFiles]          = useState([null,null,null,null])
   const [imgPrevs,         setImgPrevs]          = useState([word.picture_url||null, word.picture_url_2||null, word.picture_url_3||null, word.picture_url_4||null])
   const [imgRemoved,       setImgRemoved]        = useState([false,false,false,false])
+  const [autoLoading,      setAutoLoading]        = useState(false)
+  const [autoMsg,          setAutoMsg]            = useState('')
+  const [slotSource,       setSlotSource]         = useState([null,null,null,null])
   const [saving,           setSaving]            = useState(false)
   const [error,            setError]             = useState('')
 
@@ -189,6 +184,23 @@ function EditWordModal({ word, level, lessonOrder, onClose, onSaved }) {
     const f=[...imgFiles];f[i]=null;setImgFiles(f)
     const p=[...imgPrevs];p[i]=null;setImgPrevs(p)
     const r=[...imgRemoved];r[i]=true;setImgRemoved(r)
+    const s=[...slotSource];s[i]=null;setSlotSource(s)
+  }
+
+  // Auto-fetch: AI suggests 3 same-category distractor words, then we pull a
+  // photo for the word + each distractor from Pexels and drop them into the 4
+  // slots. The admin can still Change/Remove any slot before saving; Save then
+  // uploads them to the vocabulary-images bucket like a normal upload.
+  const handleAutoFetch = async () => {
+    if (!form.word.trim()) { setError('Enter the word first'); return }
+    setAutoLoading(true); setError(''); setAutoMsg('Asking AI for similar words…')
+    try {
+      const results = await autoFetchImagesForWord(form.word.trim(), (q, i) => setAutoMsg(`Fetching image ${i+1}/4: “${q}”…`))
+      const f=[...imgFiles], p=[...imgPrevs], r=[...imgRemoved], s=[...slotSource]
+      results.forEach((res, i) => { f[i]=res.file; p[i]=URL.createObjectURL(res.file); r[i]=false; s[i]=res.source })
+      setImgFiles(f); setImgPrevs(p); setImgRemoved(r); setSlotSource(s)
+    } catch (e) { setError('Auto-fetch failed: ' + e.message) }
+    setAutoLoading(false); setAutoMsg('')
   }
 
   const uploadImages = async () => {
@@ -380,11 +392,24 @@ function EditWordModal({ word, level, lessonOrder, onClose, onSaved }) {
         <div style={{ marginBottom:'16px' }}>
           <label style={lbl}>Quiz Images <span style={{ fontWeight:'400', textTransform:'none', color:'#94a3b8' }}>— all 4 or none</span></label>
           <div style={{ background:'#f8fafb', borderRadius:'12px', padding:'12px', border:'1.5px dashed #e4e8e7' }}>
-            <div style={{ fontSize:'12px', color:'#94a3b8', marginBottom:'10px' }}>1 correct image + 3 wrong options for the picture quiz</div>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:'8px', marginBottom:'10px' }}>
+              <div style={{ fontSize:'12px', color:'#94a3b8' }}>1 correct image + 3 wrong options for the picture quiz</div>
+              <button type="button" onClick={handleAutoFetch} disabled={autoLoading}
+                style={{ padding:'6px 12px', borderRadius:'8px', border:'none', background:autoLoading?'#94a3b8':G, color:'white', fontSize:'12px', fontWeight:'700', cursor:autoLoading?'default':'pointer', flexShrink:0, whiteSpace:'nowrap' }}>
+                {autoLoading ? 'Fetching…' : '✨ Auto-fetch'}
+              </button>
+            </div>
+            {autoMsg && <div style={{ fontSize:'12px', color:G, fontWeight:'600', marginBottom:'10px' }}>{autoMsg}</div>}
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px' }}>
               {SLOT_META.map((m,i) => (
-                <ImageSlot key={i} meta={m} preview={imgPrevs[i]} onFile={f=>handleFile(i,f)} onRemove={()=>removeSlot(i)} />
+                <div key={i}>
+                  <ImageSlot meta={m} preview={imgPrevs[i]} onFile={f=>handleFile(i,f)} onRemove={()=>removeSlot(i)} />
+                  {slotSource[i] && <div style={{ fontSize:'10px', color:'#94a3b8', marginTop:'3px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', textAlign:'center' }}>“{slotSource[i]}”</div>}
+                </div>
               ))}
+            </div>
+            <div style={{ fontSize:'11px', color:'#94a3b8', marginTop:'10px', lineHeight:1.5 }}>
+              Auto-fetch uses AI to pick 3 similar words, then pulls a photo for each from Pexels. Review them, then Change or Remove any before saving.
             </div>
           </div>
         </div>
@@ -695,37 +720,17 @@ export default function VocabAdmin() {
   useEffect(() => {
     if (!selectedLevel) return
     setSelectedLesson(null); setWords([]); setWordCounts({})
-    let cancelled = false
-    ;(async () => {
-      // Lessons for this level
-      const { data: ls } = await supabase.from('level_lessons').select('*').eq('level',selectedLevel)
+    Promise.all([
+      supabase.from('level_lessons').select('*').eq('level',selectedLevel)
         .not('lesson_name','ilike','%Mid-Term%').not('lesson_name','ilike','%Final%')
-        .order('lesson_order')
-      if (!cancelled) setLessons(ls||[])
-
-      // Per-lesson word counts.
-      // IMPORTANT: Supabase caps every request at 1000 rows, so a single
-      // .select() only ever returns the first 1000 words of the level — which is
-      // why Total Words stuck at 1000 and any lesson whose words fell past that
-      // boundary showed "Empty". Page through every row (1000 at a time, ordered
-      // by a unique column so pages never skip or repeat) and tally in memory.
-      const PAGE = 1000
-      const counts = {}
-      let from = 0
-      while (true) {
-        const { data, error } = await supabase.from('vocabulary_words')
-          .select('lesson_order')
-          .eq('level', selectedLevel)
-          .order('id', { ascending: true })
-          .range(from, from + PAGE - 1)
-        if (error || !data) break
-        for (const w of data) counts[w.lesson_order] = (counts[w.lesson_order] || 0) + 1
-        if (data.length < PAGE) break
-        from += PAGE
-      }
-      if (!cancelled) setWordCounts(counts)
-    })()
-    return () => { cancelled = true }
+        .order('lesson_order'),
+      supabase.from('vocabulary_words').select('lesson_order').eq('level',selectedLevel)
+    ]).then(([{ data:ls },{ data:ws }]) => {
+      setLessons(ls||[])
+      const counts={}
+      for(const w of(ws||[])) counts[w.lesson_order]=(counts[w.lesson_order]||0)+1
+      setWordCounts(counts)
+    })
   }, [selectedLevel])
 
   useEffect(() => { if (selectedLesson) fetchWords() }, [selectedLesson])
