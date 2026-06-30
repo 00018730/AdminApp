@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from './supabase'
 import PaymentsSection from './PaymentsSection'
 import StudentsSection from './StudentsSection'
+import StudentsListSection from './StudentsListSection'
 import ParentsSection from './ParentsSection'
 import TeachersSection from './TeachersSection'
 import GroupsSection from './GroupsSection'
@@ -150,7 +151,8 @@ export default function ManagerApp({ session, onLogout, isCEO = false }) {
           {section === 'announcements' && <AnnouncementsSection canDelete={isCEO} />}
           {section === 'holidays'      && <HolidaysSection canDelete={isCEO} />}
           {section === 'requests'      && <RequestsSection canDelete={isCEO} />}
-          {section === 'students'      && <StudentsSection canDelete={isCEO} />}
+          {section === 'students'      && <StudentsListSection role={isCEO ? 'ceo' : 'manager'} />}
+          {section === 'groupstudents' && <StudentsSection canDelete={isCEO} />}
           {section === 'parents'       && <ParentsSection role={isCEO ? 'ceo' : 'manager'} />}
           {section === 'teachers'      && <TeachersSection canDelete={isCEO} />}
           {section === 'books'         && <BooksSection canDelete={isCEO} />}
