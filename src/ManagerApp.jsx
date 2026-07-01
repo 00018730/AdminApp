@@ -10,6 +10,7 @@ import AnnouncementsSection from './AnnouncementsSection'
 import HolidaysSection from './HolidaysSection'
 import RequestsSection from './RequestsSection'
 import BooksSection from './BooksSection'
+import FinanceSection from './FinanceSection'
 
 const G = '#009472'
 const D = '#002b2a'
@@ -27,6 +28,7 @@ const NAV = [
   { id:'announcements', label:'Announcements', icon:<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> },
   { id:'holidays',      label:'Holidays',      icon:<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> },
   { id:'requests',      label:'Requests',      icon:<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="12" y2="17"/></svg> },
+  { id:'finance',       label:'Finance',       icon:<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg> },
 ]
 
 // CEO-only extra nav item
@@ -35,7 +37,7 @@ const CEO_NAV_EXTRA = { id:'notifications', label:'Notifications', icon:<svg wid
 const TITLES = {
   payments:'Payments', announcements:'Announcements', holidays:'Holidays',
   requests:'Requests', students:'Students', parents:'Parents',
-  teachers:'Team', groups:'Groups', books:'Books', notifications:'Notifications',
+  teachers:'Team', groups:'Groups', books:'Books', notifications:'Notifications', finance:'Finance',
 }
 
 // ── CEO NOTIFICATIONS: feed of high-value edits made by non-CEO staff ─────────
@@ -154,10 +156,11 @@ export default function ManagerApp({ session, onLogout, isCEO = false }) {
           {section === 'students'      && <StudentsListSection role={isCEO ? 'ceo' : 'manager'} />}
           {section === 'groupstudents' && <StudentsSection canDelete={isCEO} />}
           {section === 'parents'       && <ParentsSection role={isCEO ? 'ceo' : 'manager'} />}
-          {section === 'teachers'      && <TeachersSection canDelete={isCEO} />}
+          {section === 'teachers'      && <TeachersSection role={isCEO ? 'ceo' : 'manager'} />}
           {section === 'books'         && <BooksSection canDelete={isCEO} />}
           {section === 'groups'        && <GroupsSection onNavigate={setSection} canDelete={isCEO} />}
           {section === 'notifications' && <NotificationsView />}
+          {section === 'finance'       && <FinanceSection role={isCEO ? 'ceo' : 'manager'} />}
         </main>
       </div>
 

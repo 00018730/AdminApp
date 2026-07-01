@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from './supabase'
+import { logEdit } from './editLog'
 
 const G = '#009472'
 const D = '#002b2a'
@@ -7,15 +8,39 @@ const D = '#002b2a'
 const iStyle = { width:'100%', padding:'9px 12px', borderRadius:'8px', border:'1.5px solid #e4e8e7', fontSize:'14px', outline:'none', color:D, fontFamily:"'DM Sans',sans-serif", marginBottom:'12px', boxSizing:'border-box', background:'white' }
 const lStyle = { fontSize:'11px', fontWeight:'700', color:'#64748b', textTransform:'uppercase', letterSpacing:'0.06em', display:'block', marginBottom:'5px' }
 
-const ROLES = [
-  { key:'teacher', table:'teachers', label:'Teachers', single:'Teacher', color:G },
-  { key:'mentor',  table:'mentors',  label:'Mentors',  single:'Mentor',  color:'#8b5cf6' },
-  { key:'admin',   table:'admins',   label:'Admins',   single:'Admin',   color:'#3b82f6' },
-  { key:'manager', table:'managers', label:'Manager',  single:'Manager', color:'#f59e0b' },
-]
-const ROLE_BY_KEY = Object.fromEntries(ROLES.map(r => [r.key, r]))
-const RELATIONS = ['Parent', 'Sibling', 'Spouse', 'Other']
+const RELATIONS  = ['Parent', 'Sibling', 'Spouse', 'Other']
 const CERT_BUCKET = 'ielts-certificates'
+
+// ── Departments → role groups ────────────────────────────────────────────────
+// existing:true  → an existing table whose every row is this group (contact-edit
+//                  only; accounts come from the login system).
+// existing:false → a new department table shared by role (distinguished by the
+//                  `role` column = roleValue); manager/CEO can Add/Edit/Delete.
+const DEPARTMENTS = [
+  { id:'academic', label:'Academic', groups: [
+    { key:'teacher',  table:'teachers', single:'Teacher', color:G,          existing:true,  ielts:true,  students:true },
+    { key:'mentor',   table:'mentors',  single:'Mentor',  color:'#8b5cf6',  existing:true,  ielts:true },
+    { key:'head',     table:'academic_staff', single:'Head Teacher',        roleValue:'Head Teacher',        color:'#0ea5e9', existing:false, ielts:true },
+    { key:'counsel',  table:'academic_staff', single:'Academic Counsellor', roleValue:'Academic Counsellor', color:'#14b8a6', existing:false, ielts:true },
+    { key:'rnd',      table:'academic_staff', single:'Research & Development', roleValue:'Research & Development', color:'#6366f1', existing:false },
+  ]},
+  { id:'administrative', label:'Administrative', groups: [
+    { key:'admin',    table:'admins',   single:'Administrator', color:'#3b82f6', existing:true },
+    { key:'manager',  table:'managers', single:'Manager',       color:'#f59e0b', existing:true },
+    { key:'coo',      table:'administrative_staff', single:'Chief Operating Officer', roleValue:'Chief Operating Officer', color:'#8b5cf6', existing:false },
+  ]},
+  { id:'solutions', label:'Solutions', groups: [
+    { key:'solutions', table:'solutions_staff', single:'Solutions Specialist', roleValue:'Solutions Specialist', color:'#0ea5e9', existing:false },
+  ]},
+  { id:'hr', label:'HR', groups: [
+    { key:'hr_dir',   table:'hr_staff', single:'HR Director', roleValue:'HR Director', color:'#ec4899', existing:false },
+    { key:'recruit',  table:'hr_staff', single:'Recruiter',   roleValue:'Recruiter',   color:'#f43f5e', existing:false },
+  ]},
+  { id:'marketing', label:'Marketing', groups: [
+    { key:'mkt',      table:'marketing_staff', single:'Marketing Manager', roleValue:'Marketing Manager', color:'#f59e0b', existing:false },
+  ]},
+]
+const ALL_TABLES = [...new Set(DEPARTMENTS.flatMap(d => d.groups.map(g => g.table)))]
 
 // ── UZ phone formatting: digits → "+998 (90) 123-45-67" ──────────────────────
 function formatUzPhone(raw) {
@@ -40,20 +65,73 @@ function hasContactInfo(p) {
             p.ielts_score != null || p.ielts_certificate_url || emergencyText(p))
 }
 
+// Shared contact fields used by both Add and Edit modals
+function ContactFields({ form, set, showIelts, certFile, setCertFile, certUrl, fileRef }) {
+  return (
+    <>
+      <label style={lStyle}>Phone number</label>
+      <input value={formatUzPhone(form.phone)} onChange={e => set('phone', phoneDigits(e.target.value))} placeholder="+998 (__) ___-__-__" style={iStyle} />
+
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
+        <div><label style={lStyle}>Joining date</label><input type="date" value={form.joining_date} onChange={e => set('joining_date', e.target.value)} style={iStyle} /></div>
+        <div><label style={lStyle}>Birthday</label><input type="date" value={form.birthday} onChange={e => set('birthday', e.target.value)} style={iStyle} /></div>
+        <div><label style={lStyle}>Email</label><input value={form.email} onChange={e => set('email', e.target.value)} placeholder="name@email.com" style={iStyle} /></div>
+        <div><label style={lStyle}>Telegram username</label><input value={form.telegram} onChange={e => set('telegram', e.target.value)} placeholder="@username" style={iStyle} /></div>
+      </div>
+
+      {showIelts && (
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1.4fr', gap:'12px', alignItems:'start' }}>
+          <div>
+            <label style={lStyle}>IELTS band score</label>
+            <input type="number" step="0.5" min="0" max="9" value={form.ielts_score} onChange={e => set('ielts_score', e.target.value)} placeholder="e.g. 7.5" style={iStyle} />
+          </div>
+          <div>
+            <label style={lStyle}>IELTS certificate</label>
+            <input ref={fileRef} type="file" accept="image/*" style={{ display:'none' }} onChange={e => { if (e.target.files[0]) setCertFile(e.target.files[0]) }} />
+            <button onClick={() => fileRef.current?.click()} style={{ ...iStyle, textAlign:'left', cursor:'pointer', color:certFile||certUrl?D:'#94a3b8', display:'flex', alignItems:'center', gap:'8px' }}>
+              <span>📎</span>{certFile ? certFile.name : certUrl ? 'Uploaded — replace' : 'Upload image…'}
+            </button>
+            {certUrl && !certFile && <a href={certUrl} target="_blank" rel="noreferrer" style={{ fontSize:'12px', color:G, fontWeight:'700', textDecoration:'none' }}>View current →</a>}
+          </div>
+        </div>
+      )}
+
+      <label style={{ ...lStyle, marginTop:'6px' }}>Emergency contact</label>
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
+        <select value={form.emergency_relation} onChange={e => set('emergency_relation', e.target.value)} style={{ ...iStyle, appearance:'none' }}>
+          <option value="">Relation…</option>
+          {RELATIONS.map(r => <option key={r} value={r}>{r}</option>)}
+        </select>
+        <input value={form.emergency_name} onChange={e => set('emergency_name', e.target.value)} placeholder="Contact name" style={iStyle} />
+        <input value={formatUzPhone(form.emergency_phone)} onChange={e => set('emergency_phone', phoneDigits(e.target.value))} placeholder="+998 (__) ___-__-__" style={{ ...iStyle, gridColumn:'1/-1' }} />
+      </div>
+    </>
+  )
+}
+
+function buildContactPayload(form, finalCertUrl) {
+  return {
+    phone: form.phone ? formatUzPhone(form.phone) : null,
+    birthday: form.birthday || null,
+    joining_date: form.joining_date || null,
+    email: form.email.trim() || null,
+    telegram: form.telegram.trim().replace(/^@/, '') || null,
+    ielts_score: form.ielts_score === '' ? null : Number(form.ielts_score),
+    ielts_certificate_url: finalCertUrl || null,
+    emergency_relation: form.emergency_relation || null,
+    emergency_name: form.emergency_name.trim() || null,
+    emergency_phone: form.emergency_phone ? formatUzPhone(form.emergency_phone) : null,
+  }
+}
+
 // ════════════════════════════════════════════════════════════════════════════
-// EDIT CONTACT MODAL — contact details only; no credentials, bound to one person
+// EDIT CONTACT MODAL — contact details only, keyed by username
 // ════════════════════════════════════════════════════════════════════════════
-function ContactModal({ person, role, onClose, onSaved }) {
+function ContactModal({ person, group, onClose, onSaved }) {
   const [form, setForm] = useState({
-    phone:     phoneDigits(person.phone),
-    birthday:  person.birthday || '',
-    joining_date: person.joining_date || '',
-    email:     person.email || '',
-    telegram:  person.telegram || '',
-    ielts_score: person.ielts_score ?? '',
-    emergency_relation: person.emergency_relation || '',
-    emergency_name:     person.emergency_name || '',
-    emergency_phone:    phoneDigits(person.emergency_phone),
+    phone: phoneDigits(person.phone), birthday: person.birthday || '', joining_date: person.joining_date || '',
+    email: person.email || '', telegram: person.telegram || '', ielts_score: person.ielts_score ?? '',
+    emergency_relation: person.emergency_relation || '', emergency_name: person.emergency_name || '', emergency_phone: phoneDigits(person.emergency_phone),
   })
   const [certFile, setCertFile] = useState(null)
   const [certUrl,  setCertUrl]  = useState(person.ielts_certificate_url || null)
@@ -64,102 +142,106 @@ function ContactModal({ person, role, onClose, onSaved }) {
 
   const save = async () => {
     setSaving(true); setError('')
-
     let finalCertUrl = certUrl
     if (certFile) {
       const ext  = certFile.name.split('.').pop()
-      const path = `${role}_${person.username}_${Date.now()}.${ext}`
+      const path = `${group.table}_${person.username}_${Date.now()}.${ext}`
       const { data: up, error: upErr } = await supabase.storage.from(CERT_BUCKET).upload(path, certFile, { upsert: true })
       if (upErr) { setError('Certificate upload failed: ' + upErr.message); setSaving(false); return }
       finalCertUrl = supabase.storage.from(CERT_BUCKET).getPublicUrl(up.path).data.publicUrl
     }
-
-    const payload = {
-      phone: form.phone ? formatUzPhone(form.phone) : null,
-      birthday: form.birthday || null,
-      joining_date: form.joining_date || null,
-      email: form.email.trim() || null,
-      telegram: form.telegram.trim().replace(/^@/, '') || null,
-      ielts_score: form.ielts_score === '' ? null : Number(form.ielts_score),
-      ielts_certificate_url: finalCertUrl || null,
-      emergency_relation: form.emergency_relation || null,
-      emergency_name: form.emergency_name.trim() || null,
-      emergency_phone: form.emergency_phone ? formatUzPhone(form.emergency_phone) : null,
-    }
-    const { error: err } = await supabase.from(ROLE_BY_KEY[role].table).update(payload).eq('username', person.username)
+    const { error: err } = await supabase.from(group.table).update(buildContactPayload(form, finalCertUrl)).eq('username', person.username)
     if (err) { setError(err.message); setSaving(false); return }
+    logEdit({ action:'update', target_table:group.table, target_id:person.username, summary:`Updated ${group.single} ${person.full_name || person.username} contact details` })
     onSaved()
   }
 
+  return (
+    <ModalShell title={person.full_name || person.username} subtitle={`${group.single} · contact details`} color={group.color} initials={initialsOf(person.full_name)} onClose={onClose}>
+      <ContactFields form={form} set={set} showIelts={!!group.ielts} certFile={certFile} setCertFile={setCertFile} certUrl={certUrl} fileRef={fileRef} />
+      {error && <div style={{ color:'#ef4444', fontSize:'13px', fontWeight:'600', marginBottom:'12px' }}>{error}</div>}
+      <ModalButtons saving={saving} onClose={onClose} onSave={save} saveLabel="Save contact details" />
+    </ModalShell>
+  )
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ADD STAFF MODAL — new-role people (username + password + name + contact)
+// ════════════════════════════════════════════════════════════════════════════
+function AddStaffModal({ group, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    username:'', password:'', full_name:'',
+    phone:'', birthday:'', joining_date:'', email:'', telegram:'', ielts_score:'',
+    emergency_relation:'', emergency_name:'', emergency_phone:'',
+  })
+  const [certFile, setCertFile] = useState(null)
+  const [saving,   setSaving]   = useState(false)
+  const [error,    setError]    = useState('')
+  const fileRef = useRef(null)
+  const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
+
+  const save = async () => {
+    if (!form.full_name.trim() || !form.username.trim() || !form.password) { setError('Name, username and password are required.'); return }
+    setSaving(true); setError('')
+    let finalCertUrl = null
+    if (certFile) {
+      const ext  = certFile.name.split('.').pop()
+      const path = `${group.table}_${form.username.trim()}_${Date.now()}.${ext}`
+      const { data: up, error: upErr } = await supabase.storage.from(CERT_BUCKET).upload(path, certFile, { upsert: true })
+      if (upErr) { setError('Certificate upload failed: ' + upErr.message); setSaving(false); return }
+      finalCertUrl = supabase.storage.from(CERT_BUCKET).getPublicUrl(up.path).data.publicUrl
+    }
+    const payload = {
+      username: form.username.trim(), password: form.password, full_name: form.full_name.trim(),
+      role: group.roleValue, ...buildContactPayload(form, finalCertUrl),
+    }
+    const { error: err } = await supabase.from(group.table).insert(payload)
+    if (err) { setError(err.code === '23505' ? 'That username already exists.' : err.message); setSaving(false); return }
+    logEdit({ action:'create', target_table:group.table, target_id:payload.username, summary:`Added ${group.single} ${payload.full_name}` })
+    onSaved()
+  }
+
+  return (
+    <ModalShell title={`Add ${group.single}`} subtitle="New staff member" color={group.color} initials="+" onClose={onClose}>
+      <label style={lStyle}>Full name</label>
+      <input value={form.full_name} onChange={e => set('full_name', e.target.value)} placeholder="e.g. Dilnoza Karimova" style={iStyle} />
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
+        <div><label style={lStyle}>Username</label><input value={form.username} onChange={e => set('username', e.target.value)} placeholder="e.g. dilnoza" style={iStyle} /></div>
+        <div><label style={lStyle}>Password</label><input value={form.password} onChange={e => set('password', e.target.value)} placeholder="Set a password" style={iStyle} /></div>
+      </div>
+      <div style={{ fontSize:'11px', color:'#94a3b8', marginTop:'-4px', marginBottom:'12px' }}>Username + password prepare this person for a login later.</div>
+      <ContactFields form={form} set={set} showIelts={!!group.ielts} certFile={certFile} setCertFile={setCertFile} certUrl={null} fileRef={fileRef} />
+      {error && <div style={{ color:'#ef4444', fontSize:'13px', fontWeight:'600', marginBottom:'12px' }}>{error}</div>}
+      <ModalButtons saving={saving} onClose={onClose} onSave={save} saveLabel={`Add ${group.single}`} />
+    </ModalShell>
+  )
+}
+
+// ── shared modal chrome ──────────────────────────────────────────────────────
+function ModalShell({ title, subtitle, color, initials, onClose, children }) {
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.45)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:300, padding:'24px', fontFamily:"'DM Sans',sans-serif" }}
       onClick={e => e.target === e.currentTarget && onClose()}>
       <div style={{ background:'white', borderRadius:'18px', padding:'26px', width:'100%', maxWidth:'520px', boxShadow:'0 24px 64px rgba(0,0,0,0.18)', maxHeight:'92vh', overflowY:'auto' }}>
         <div style={{ display:'flex', alignItems:'center', gap:'12px', marginBottom:'18px' }}>
-          <div style={{ width:'44px', height:'44px', borderRadius:'12px', background:`${ROLE_BY_KEY[role].color}15`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'15px', fontWeight:'800', color:ROLE_BY_KEY[role].color, fontFamily:"'Plus Jakarta Sans',sans-serif", flexShrink:0 }}>{initialsOf(person.full_name)}</div>
+          <div style={{ width:'44px', height:'44px', borderRadius:'12px', background:`${color}15`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'15px', fontWeight:'800', color, fontFamily:"'Plus Jakarta Sans',sans-serif", flexShrink:0 }}>{initials}</div>
           <div>
-            <h3 style={{ fontSize:'17px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', color:D }}>{person.full_name || person.username}</h3>
-            <div style={{ fontSize:'12px', color:'#94a3b8' }}>{ROLE_BY_KEY[role].single} · contact details</div>
+            <h3 style={{ fontSize:'17px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', color:D }}>{title}</h3>
+            <div style={{ fontSize:'12px', color:'#94a3b8' }}>{subtitle}</div>
           </div>
         </div>
-
-        <label style={lStyle}>Phone number</label>
-        <input value={formatUzPhone(form.phone)} onChange={e => set('phone', phoneDigits(e.target.value))} placeholder="+998 (__) ___-__-__" style={iStyle} />
-
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
-          <div>
-            <label style={lStyle}>Joining date</label>
-            <input type="date" value={form.joining_date} onChange={e => set('joining_date', e.target.value)} style={iStyle} />
-          </div>
-          <div>
-            <label style={lStyle}>Birthday</label>
-            <input type="date" value={form.birthday} onChange={e => set('birthday', e.target.value)} style={iStyle} />
-          </div>
-          <div>
-            <label style={lStyle}>Email</label>
-            <input value={form.email} onChange={e => set('email', e.target.value)} placeholder="name@email.com" style={iStyle} />
-          </div>
-          <div>
-            <label style={lStyle}>Telegram username</label>
-            <input value={form.telegram} onChange={e => set('telegram', e.target.value)} placeholder="@username" style={iStyle} />
-          </div>
-        </div>
-
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1.4fr', gap:'12px', alignItems:'start' }}>
-          <div>
-            <label style={lStyle}>IELTS band score</label>
-            <input type="number" step="0.5" min="0" max="9" value={form.ielts_score} onChange={e => set('ielts_score', e.target.value)} placeholder="e.g. 7.5" style={iStyle} />
-          </div>
-          <div>
-            <label style={lStyle}>IELTS certificate</label>
-            <input ref={fileRef} type="file" accept="image/*" style={{ display:'none' }}
-              onChange={e => { if (e.target.files[0]) setCertFile(e.target.files[0]) }} />
-            <button onClick={() => fileRef.current?.click()}
-              style={{ ...iStyle, textAlign:'left', cursor:'pointer', color:certFile||certUrl?D:'#94a3b8', display:'flex', alignItems:'center', gap:'8px' }}>
-              <span>📎</span>{certFile ? certFile.name : certUrl ? 'Uploaded — replace' : 'Upload image…'}
-            </button>
-            {certUrl && !certFile && <a href={certUrl} target="_blank" rel="noreferrer" style={{ fontSize:'12px', color:G, fontWeight:'700', textDecoration:'none' }}>View current →</a>}
-          </div>
-        </div>
-
-        <label style={{ ...lStyle, marginTop:'6px' }}>Emergency contact</label>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
-          <select value={form.emergency_relation} onChange={e => set('emergency_relation', e.target.value)} style={{ ...iStyle, appearance:'none' }}>
-            <option value="">Relation…</option>
-            {RELATIONS.map(r => <option key={r} value={r}>{r}</option>)}
-          </select>
-          <input value={form.emergency_name} onChange={e => set('emergency_name', e.target.value)} placeholder="Contact name" style={iStyle} />
-          <input value={formatUzPhone(form.emergency_phone)} onChange={e => set('emergency_phone', phoneDigits(e.target.value))} placeholder="+998 (__) ___-__-__" style={{ ...iStyle, gridColumn:'1/-1' }} />
-        </div>
-
-        {error && <div style={{ color:'#ef4444', fontSize:'13px', fontWeight:'600', marginBottom:'12px' }}>{error}</div>}
-        <div style={{ display:'flex', gap:'10px', marginTop:'4px' }}>
-          <button onClick={onClose} style={{ flex:1, padding:'12px', borderRadius:'10px', border:'1.5px solid #e4e8e7', background:'white', color:'#64748b', fontSize:'14px', fontWeight:'600', cursor:'pointer' }}>Cancel</button>
-          <button onClick={save} disabled={saving} style={{ flex:2, padding:'12px', borderRadius:'10px', border:'none', background:G, color:'white', fontSize:'14px', fontWeight:'700', cursor:'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>
-            {saving ? 'Saving…' : 'Save contact details'}
-          </button>
-        </div>
+        {children}
       </div>
+    </div>
+  )
+}
+function ModalButtons({ saving, onClose, onSave, saveLabel }) {
+  return (
+    <div style={{ display:'flex', gap:'10px', marginTop:'4px' }}>
+      <button onClick={onClose} style={{ flex:1, padding:'12px', borderRadius:'10px', border:'1.5px solid #e4e8e7', background:'white', color:'#64748b', fontSize:'14px', fontWeight:'600', cursor:'pointer' }}>Cancel</button>
+      <button onClick={onSave} disabled={saving} style={{ flex:2, padding:'12px', borderRadius:'10px', border:'none', background:G, color:'white', fontSize:'14px', fontWeight:'700', cursor:'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>
+        {saving ? 'Saving…' : saveLabel}
+      </button>
     </div>
   )
 }
@@ -180,8 +262,8 @@ function InfoRow({ icon, label, value, href }) {
   )
 }
 
-function MemberCard({ person, role, activeStudents, onEdit }) {
-  const color = ROLE_BY_KEY[role].color
+function MemberCard({ person, group, activeStudents, canWrite, onEdit, onDelete }) {
+  const color = group.color
   const emerg = emergencyText(person)
   const filled = hasContactInfo(person)
   return (
@@ -194,7 +276,7 @@ function MemberCard({ person, role, activeStudents, onEdit }) {
             <div style={{ fontSize:'16px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', color:D, lineHeight:1.2 }}>{person.full_name || person.username}</div>
             <div style={{ fontSize:'12px', color:'#94a3b8', marginTop:'2px', fontFamily:'monospace' }}>@{person.username}</div>
           </div>
-          {role === 'teacher' && activeStudents != null && (
+          {group.students && activeStudents != null && (
             <div style={{ textAlign:'center', flexShrink:0 }}>
               <div style={{ fontSize:'18px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>{activeStudents}</div>
               <div style={{ fontSize:'10px', color:'#94a3b8', fontWeight:'600' }}>students</div>
@@ -219,97 +301,124 @@ function MemberCard({ person, role, activeStudents, onEdit }) {
           </div>
         )}
 
-        <button onClick={onEdit} style={{ width:'100%', padding:'9px', borderRadius:'8px', border:`1.5px solid ${G}`, background:`${G}10`, color:G, fontSize:'13px', fontWeight:'700', cursor:'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>
-          {filled ? 'Edit contact details' : 'Add contact details'}
-        </button>
+        {canWrite ? (
+          <div style={{ display:'flex', gap:'8px' }}>
+            <button onClick={onEdit} style={{ flex:1, padding:'9px', borderRadius:'8px', border:`1.5px solid ${G}`, background:`${G}10`, color:G, fontSize:'13px', fontWeight:'700', cursor:'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>
+              {filled ? 'Edit contact details' : 'Add contact details'}
+            </button>
+            {!group.existing && onDelete && (
+              <button onClick={onDelete} title="Remove" style={{ width:'40px', borderRadius:'8px', border:'1.5px solid #fca5a5', background:'#fef2f2', color:'#dc2626', fontSize:'16px', fontWeight:'800', cursor:'pointer', flexShrink:0 }}>×</button>
+            )}
+          </div>
+        ) : (
+          <div style={{ fontSize:'12px', color:'#cbd5e1', textAlign:'center', padding:'4px' }}>View only</div>
+        )}
       </div>
     </div>
   )
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// MAIN — TEAM (contact directory; staff accounts are created in the manager app)
+// MAIN — TEAM by department. Manager + CEO can write; others read-only.
 // ════════════════════════════════════════════════════════════════════════════
-export default function TeachersSection() {
-  const [tab,      setTab]      = useState('teacher')
-  const [people,   setPeople]   = useState({ teacher:[], mentor:[], admin:[], manager:[] })
+export default function TeachersSection({ role, readOnly = false }) {
+  const canWrite = role === 'manager' || role === 'ceo' ? true : (role ? false : !readOnly)
+
+  const [deptId,   setDeptId]   = useState(DEPARTMENTS[0].id)
+  const [byTable,  setByTable]  = useState({})
   const [students, setStudents] = useState([])
   const [loading,  setLoading]  = useState(true)
-  const [editing,  setEditing]  = useState(null)   // { person, role }
+  const [editing,  setEditing]  = useState(null)   // { person, group }
+  const [adding,   setAdding]   = useState(null)    // group
 
   useEffect(() => { fetchAll() }, [])
 
   const fetchAll = async () => {
     setLoading(true)
-    const [t, m, a, mg, st] = await Promise.all([
-      supabase.from('teachers').select('*').order('full_name'),
-      supabase.from('mentors').select('*').order('full_name'),
-      supabase.from('admins').select('*').order('full_name'),
-      supabase.from('managers').select('*').order('full_name'),
-      supabase.from('students').select('teacher_username,status'),
-    ])
-    setPeople({ teacher: t.data || [], mentor: m.data || [], admin: a.data || [], manager: mg.data || [] })
-    setStudents(st.data || [])
+    const results = await Promise.all(ALL_TABLES.map(t => supabase.from(t).select('*').order('full_name')))
+    const map = {}; ALL_TABLES.forEach((t, i) => { map[t] = results[i].data || [] })
+    const { data: st } = await supabase.from('students').select('teacher_username,status')
+    setByTable(map); setStudents(st || [])
     setLoading(false)
   }
 
-  const activeCountFor = (username) =>
-    students.filter(s => s.teacher_username === username && s.status !== 'left').length
+  const activeCountFor = (username) => students.filter(s => s.teacher_username === username && s.status !== 'left').length
+  const groupList = (g) => {
+    const rows = byTable[g.table] || []
+    return g.existing ? rows : rows.filter(p => p.role === g.roleValue)
+  }
 
-  const list = people[tab] || []
+  const del = async (group, person) => {
+    if (!confirm(`Remove ${group.single} "${person.full_name || person.username}"?`)) return
+    await supabase.from(group.table).delete().eq('username', person.username)
+    logEdit({ action:'delete', target_table:group.table, target_id:person.username, summary:`Removed ${group.single} ${person.full_name || person.username}` })
+    fetchAll()
+  }
+
+  const dept = DEPARTMENTS.find(d => d.id === deptId) || DEPARTMENTS[0]
 
   return (
-    <div style={{ display:'flex', gap:'24px', fontFamily:"'DM Sans',sans-serif", alignItems:'flex-start' }}>
+    <div style={{ fontFamily:"'DM Sans',sans-serif" }}>
       <style>{`select{-webkit-appearance:none;-moz-appearance:none}`}</style>
 
-      {/* Sub-sidebar */}
-      <div style={{ width:'190px', flexShrink:0, background:'white', borderRadius:'14px', border:'1.5px solid #f0f2f1', padding:'8px', position:'sticky', top:'24px' }}>
-        {ROLES.map(r => {
-          const active = tab === r.key
+      {/* Department tabs */}
+      <div style={{ display:'flex', gap:'8px', marginBottom:'22px', overflowX:'auto', paddingBottom:'4px' }}>
+        {DEPARTMENTS.map(d => {
+          const active = d.id === deptId
+          const count = d.groups.reduce((a, g) => a + groupList(g).length, 0)
           return (
-            <button key={r.key} onClick={() => setTab(r.key)}
-              style={{ width:'100%', display:'flex', alignItems:'center', justifyContent:'space-between', padding:'11px 13px', borderRadius:'9px', border:'none', background:active?`${r.color}12`:'transparent', color:active?r.color:'#64748b', fontSize:'13px', fontWeight:active?'700':'500', cursor:'pointer', marginBottom:'2px', textAlign:'left', fontFamily:"'DM Sans',sans-serif" }}>
-              {r.label}
-              <span style={{ fontSize:'11px', fontFamily:'monospace', background:active?`${r.color}20`:'#f0f2f1', color:active?r.color:'#94a3b8', padding:'1px 7px', borderRadius:'20px' }}>{(people[r.key]||[]).length}</span>
+            <button key={d.id} onClick={() => setDeptId(d.id)}
+              style={{ padding:'9px 18px', borderRadius:'999px', border:`2px solid ${active?G:'#e4e8e7'}`, background:active?G:'white', color:active?'white':D, fontSize:'13px', fontWeight:'700', cursor:'pointer', whiteSpace:'nowrap', fontFamily:"'Plus Jakarta Sans',sans-serif", flexShrink:0, boxShadow:active?`0 3px 12px ${G}35`:'none' }}>
+              {d.label} <span style={{ opacity:0.7 }}>· {loading ? '…' : count}</span>
             </button>
           )
         })}
       </div>
 
-      {/* Content */}
-      <div style={{ flex:1, minWidth:0 }}>
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'18px' }}>
-          <div style={{ fontSize:'14px', color:'#94a3b8' }}>{loading ? 'Loading…' : `${list.length} ${ROLE_BY_KEY[tab].label.toLowerCase()}`}</div>
-          <div style={{ fontSize:'12px', color:'#94a3b8' }}>Accounts are created in the manager app</div>
-        </div>
-
-        {loading ? (
-          <div style={{ textAlign:'center', padding:'80px', color:'#94a3b8' }}>Loading…</div>
-        ) : list.length === 0 ? (
-          <div style={{ textAlign:'center', padding:'60px', background:'white', borderRadius:'14px', border:'1.5px solid #e4e8e7' }}>
-            <div style={{ fontSize:'40px', marginBottom:'12px' }}>👥</div>
-            <div style={{ fontSize:'16px', fontWeight:'700', color:D, marginBottom:'4px', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>No {ROLE_BY_KEY[tab].label.toLowerCase()} yet</div>
-            <div style={{ fontSize:'13px', color:'#94a3b8' }}>They'll appear here once the manager creates their accounts.</div>
-          </div>
-        ) : (
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(310px, 1fr))', gap:'14px' }}>
-            {list.map(p => (
-              <MemberCard key={p.username} person={p} role={tab}
-                activeStudents={tab === 'teacher' ? activeCountFor(p.username) : null}
-                onEdit={() => setEditing({ person:p, role:tab })} />
-            ))}
-          </div>
-        )}
-      </div>
-
-      {editing && (
-        <ContactModal
-          person={editing.person}
-          role={editing.role}
-          onClose={() => setEditing(null)}
-          onSaved={() => { setEditing(null); fetchAll() }}
-        />
+      {!canWrite && (
+        <div style={{ fontSize:'12px', color:'#94a3b8', marginBottom:'16px' }}>You have view-only access to staff information. Managers and the CEO can edit it.</div>
       )}
+
+      {loading ? (
+        <div style={{ textAlign:'center', padding:'80px', color:'#94a3b8' }}>Loading…</div>
+      ) : (
+        dept.groups.map(g => {
+          const list = groupList(g)
+          return (
+            <div key={g.key} style={{ marginBottom:'28px' }}>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'12px' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:'9px' }}>
+                  <span style={{ width:'9px', height:'9px', borderRadius:'50%', background:g.color, flexShrink:0 }} />
+                  <span style={{ fontSize:'15px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>{g.single}</span>
+                  <span style={{ fontSize:'11px', fontFamily:'monospace', background:'#f0f2f1', color:'#94a3b8', padding:'1px 8px', borderRadius:'20px' }}>{list.length}</span>
+                </div>
+                {canWrite && !g.existing && (
+                  <button onClick={() => setAdding(g)} style={{ padding:'7px 14px', borderRadius:'8px', border:'none', background:G, color:'white', fontSize:'12px', fontWeight:'700', cursor:'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>+ Add {g.single}</button>
+                )}
+              </div>
+
+              {list.length === 0 ? (
+                <div style={{ background:'white', borderRadius:'12px', border:'1.5px solid #f0f2f1', padding:'22px', textAlign:'center', fontSize:'13px', color:'#94a3b8' }}>
+                  {g.existing ? `No ${g.single.toLowerCase()}s yet — accounts are created via login setup.` : `No ${g.single.toLowerCase()} yet.`}
+                </div>
+              ) : (
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(310px, 1fr))', gap:'14px' }}>
+                  {list.map(p => (
+                    <MemberCard key={p.username} person={p} group={g}
+                      activeStudents={g.students ? activeCountFor(p.username) : null}
+                      canWrite={canWrite}
+                      onEdit={() => setEditing({ person:p, group:g })}
+                      onDelete={() => del(g, p)} />
+                  ))}
+                </div>
+              )}
+            </div>
+          )
+        })
+      )}
+
+      {editing && <ContactModal person={editing.person} group={editing.group} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); fetchAll() }} />}
+      {adding  && <AddStaffModal group={adding} onClose={() => setAdding(null)} onSaved={() => { setAdding(null); fetchAll() }} />}
     </div>
   )
 }

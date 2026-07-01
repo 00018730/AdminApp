@@ -18,14 +18,24 @@ import ManagerApp from './ManagerApp'
 const G = '#009472'
 const D = '#002b2a'
 
-// Login is checked against these tables in order; first match wins and sets the
-// role. Each table has username + password + full_name (see roles_migration.sql).
+// Login is checked against these tables in order; first match wins.
+// Base tables carry a fixed role. The department tables (roleFromColumn) hold
+// several roles distinguished by their `role` column, so the specific role
+// (e.g. "Head Teacher") comes from the matched row.
 const ROLE_TABLES = [
   { table: 'ceo',       role: 'ceo' },
   { table: 'managers',  role: 'manager' },
   { table: 'admins',    role: 'admin' },
   { table: 'education', role: 'education' },
+  { table: 'academic_staff',       roleFromColumn: true },
+  { table: 'administrative_staff', roleFromColumn: true },
+  { table: 'solutions_staff',      roleFromColumn: true },
+  { table: 'hr_staff',             roleFromColumn: true },
+  { table: 'marketing_staff',      roleFromColumn: true },
 ]
+
+// Base roles that have real views; anything else is a new staff role → placeholder.
+const BASE_ROLES = ['ceo', 'manager', 'admin', 'education']
 
 // logEdit now lives in ./editLog (re-exported for any existing importers).
 export { logEdit }
@@ -42,10 +52,12 @@ function Login({ onLogin }) {
     setLoading(true); setError('')
     const uname = username.trim()
     try {
-      for (const { table, role } of ROLE_TABLES) {
-        const { data } = await supabase.from(table).select('username,password,full_name').eq('username', uname).maybeSingle()
+      for (const { table, role, roleFromColumn } of ROLE_TABLES) {
+        const cols = roleFromColumn ? 'username,password,full_name,role' : 'username,password,full_name'
+        const { data } = await supabase.from(table).select(cols).eq('username', uname).maybeSingle()
         if (data && data.password === password) {
-          onLogin({ username: data.username, full_name: data.full_name || data.username, role })
+          const resolvedRole = roleFromColumn ? (data.role || 'staff') : role
+          onLogin({ username: data.username, full_name: data.full_name || data.username, role: resolvedRole })
           return
         }
       }
@@ -240,8 +252,37 @@ function AdminApp({ session, onLogout }) {
       {section === 'payments' && <PaymentsSection role="admin" />}
       {section === 'tests'    && <TestsSection onNavigate={setSection} />}
       {section === 'parents'  && <ParentsSection role="admin" />}
-      {section === 'teachers' && <TeachersSection />}
+      {section === 'teachers' && <TeachersSection role="admin" />}
     </AppShell>
+  )
+}
+
+// Placeholder landing for the new staff roles until each gets a custom view.
+function StaffPlaceholderApp({ session, onLogout }) {
+  return (
+    <div style={{ minHeight:'100vh', display:'flex', flexDirection:'column', background:'#f0f2f1', fontFamily:"'DM Sans',sans-serif" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap');*{box-sizing:border-box;margin:0;padding:0}`}</style>
+      <header style={{ background:D, padding:'0 32px', height:'62px', display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
+          <div style={{ width:'34px', height:'34px', borderRadius:'10px', background:G, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>
+          </div>
+          <div style={{ fontSize:'14px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', color:'white' }}>Smart Learning Center</div>
+        </div>
+        <button onClick={onLogout} style={{ padding:'8px 14px', borderRadius:'8px', border:'1px solid rgba(255,255,255,0.15)', background:'transparent', color:'rgba(255,255,255,0.6)', fontSize:'13px', fontWeight:'600', cursor:'pointer', display:'flex', alignItems:'center', gap:'7px' }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          Sign out
+        </button>
+      </header>
+      <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', padding:'24px' }}>
+        <div style={{ background:'white', borderRadius:'20px', padding:'44px 40px', maxWidth:'440px', width:'100%', textAlign:'center', boxShadow:'0 12px 40px rgba(0,0,0,0.08)' }}>
+          <div style={{ fontSize:'44px', marginBottom:'14px' }}>👋</div>
+          <div style={{ fontSize:'22px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', color:D, marginBottom:'6px' }}>Welcome, {session.full_name}</div>
+          <div style={{ display:'inline-block', fontSize:'13px', fontWeight:'700', color:G, background:`${G}12`, padding:'5px 14px', borderRadius:'20px', marginBottom:'18px' }}>{session.role}</div>
+          <p style={{ fontSize:'14px', color:'#64748b', lineHeight:1.7 }}>Your {session.role} dashboard is being built and will appear here soon. Thanks for your patience.</p>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -252,9 +293,12 @@ export default function App() {
   const login  = (s) => { localStorage.setItem('slc_session', JSON.stringify(s)); setSession(s) }
   const logout = ()  => { localStorage.removeItem('slc_session'); localStorage.removeItem('slc_role'); setSession(null) }
 
-  if (!session)                  return <Login onLogin={login} />
+  if (!session)                    return <Login onLogin={login} />
   if (session.role === 'education') return <EducationApp session={session} onLogout={logout} />
   if (session.role === 'manager')  return <ManagerApp session={session} onLogout={logout} />
   if (session.role === 'ceo')      return <ManagerApp session={session} onLogout={logout} isCEO />
-  return <AdminApp session={session} onLogout={logout} />
+  if (session.role === 'admin')    return <AdminApp session={session} onLogout={logout} />
+  // Any new staff role (Head Teacher, COO, HR Director, …) → placeholder for now.
+  return <StaffPlaceholderApp session={session} onLogout={logout} />
 }
+

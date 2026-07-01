@@ -539,6 +539,21 @@ function owedThisMonth(s, month, year, holidays) {
   return lessons * PER_LESSON_FEE
 }
 
+// A LEFT student owes for their final month, prorated to their leave date:
+// 60k × lessons from the start of the leave month up to (and including) left_date.
+// Returns { owed, month, year } or null if we can't determine the leave date.
+function leftStudentOwed(s, holidays) {
+  if (!s.left_date) return null
+  const ld = new Date(s.left_date + 'T00:00:00')
+  if (isNaN(ld)) return null
+  const lm = ld.getMonth() + 1, ly = ld.getFullYear()
+  const monthStart = `${ly}-${String(lm).padStart(2,'0')}-01`
+  // count from enrolment if they enrolled mid-leave-month, else from month start
+  const start = (s.enrolled_date && s.enrolled_date > monthStart) ? s.enrolled_date : monthStart
+  const lessons = countClassDays(start, ld, s.day, relevantHolidays(s, holidays))
+  return { owed: lessons * PER_LESSON_FEE, month: lm, year: ly }
+}
+
 // ── record-payment modal (today, presets 700k, partial allowed) ──────────────
 function AdminPaymentModal({ prefill, defaultAmount, students, groups, teachers, month, year, onClose, onSaved }) {
   const locked = !!prefill
@@ -706,7 +721,10 @@ function UnpaidBucketModal({ title, rows, teachers, onRecord, onClose }) {
                 <span style={{ fontSize:'12px', fontWeight:'800', color:'#ef4444' }}>{r.student.full_name.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase()}</span>
               </div>
               <div style={{ flex:1, minWidth:0 }}>
-                <div style={{ fontSize:'14px', fontWeight:'700', color:DARK, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.student.full_name}</div>
+                <div style={{ fontSize:'14px', fontWeight:'700', color:DARK, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', display:'flex', alignItems:'center', gap:'7px' }}>
+                  {r.student.full_name}
+                  {r.student.status==='left' && <span style={{ fontSize:'10px', fontWeight:'700', padding:'2px 7px', borderRadius:'20px', background:'#fee2e2', color:'#dc2626', flexShrink:0 }}>Left</span>}
+                </div>
                 <div style={{ fontSize:'11px', color:'#94a3b8' }}>{tName(r.student.teacher_username)} · {dayLabel(r.student.day)} · {r.student.class_time}</div>
                 {r.student.phone && (
                   <a href={`tel:${r.student.phone}`} style={{ fontSize:'12px', color:G, fontWeight:'700', textDecoration:'none', display:'inline-flex', alignItems:'center', gap:'4px', marginTop:'2px' }}>
@@ -825,6 +843,7 @@ function AdminPayments() {
   const [groups,   setGroups]   = useState([])
   const [teachers, setTeachers] = useState([])
   const [holidays, setHolidays] = useState([])
+  const [leftPayments, setLeftPayments] = useState([])  // all-time payments for left students
   const [loading,  setLoading]  = useState(true)
   const [record,   setRecord]   = useState(null)   // { prefill, defaultAmount } | 'new'
   const [bucket,   setBucket]   = useState(null)    // 'old' | 'new'
@@ -842,6 +861,18 @@ function AdminPayments() {
       supabase.from('holidays').select('*'),
     ])
     setPayments(pays||[]); setStudents(stus||[]); setGroups(grps||[]); setTeachers(tchs||[]); setHolidays(hols||[])
+
+    // Left students owe for their FINAL month (prorated to leave date), which may
+    // be a past month, so we need their payments from that month specifically.
+    const leftUsernames = (stus||[]).filter(s => s.status==='left' && s.left_date).map(s => s.username)
+    if (leftUsernames.length) {
+      const { data: lp } = await supabase.from('payments')
+        .select('student_username,amount,discount_percent,payment_month,payment_year')
+        .in('student_username', leftUsernames)
+      setLeftPayments(lp||[])
+    } else {
+      setLeftPayments([])
+    }
     setLoading(false)
   }
 
@@ -864,7 +895,23 @@ function AdminPayments() {
     return { student:s, owed, paid, remaining: Math.max(owed - paid, 0) }
   }
   const unpaidNew = active.filter(s => isNewThisMonth(s, month, year)).map(buildRow).filter(r => r.remaining > 0)
-  const unpaidOld = active.filter(s => !isNewThisMonth(s, month, year)).map(buildRow).filter(r => r.remaining > 0)
+  const unpaidOldActive = active.filter(s => !isNewThisMonth(s, month, year)).map(buildRow).filter(r => r.remaining > 0)
+
+  // LEFT students who still owe their final-month dues (prorated to leave date).
+  // Owed/paid are computed against their LEAVE month — which may be a past month
+  // — so they show up regardless of the current month.
+  const leftRows = students.filter(s => s.status === 'left').map(s => {
+    const info = leftStudentOwed(s, holidays)
+    if (!info) return null
+    const monthPays = leftPayments.filter(p => p.student_username === s.username && p.payment_month === info.month && p.payment_year === info.year)
+    const paid = monthPays.reduce((a,p) => a + Number(p.amount||0), 0)
+    const maxDisc = monthPays.reduce((mx,p) => Math.max(mx, Number(p.discount_percent||0)), 0)
+    const owed = applyDiscount(info.owed, maxDisc)
+    return { student:s, owed, paid, remaining: Math.max(owed - paid, 0), leftMonth: info.month, leftYear: info.year }
+  }).filter(r => r && r.remaining > 0)
+
+  // Left students join the "old" bucket, flagged as Left.
+  const unpaidOld = [...unpaidOldActive, ...leftRows]
 
   // today's payments + report stats
   const todayPayments = payments.filter(p => localDay(p.payment_date) === today)
@@ -880,7 +927,12 @@ function AdminPayments() {
 
   const dateLabel = now.toLocaleDateString('en-US', { weekday:'long', year:'numeric', month:'long', day:'numeric' })
 
-  const openRecordForRow = (r) => setRecord({ prefill:r.student, defaultAmount:r.remaining })
+  const openRecordForRow = (r) => setRecord({
+    prefill: r.student,
+    defaultAmount: r.remaining,
+    // left students: file the payment into their leave month so it clears the debt
+    ...(r.student.status === 'left' && r.leftMonth ? { month: r.leftMonth, year: r.leftYear } : {}),
+  })
 
   const th = { fontSize:'11px', fontWeight:'700', color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.05em', padding:'12px 16px' }
   const cols = '150px 1fr 160px 120px 90px'
@@ -962,7 +1014,9 @@ function AdminPayments() {
         <AdminPaymentModal
           prefill={record === 'new' ? null : record.prefill}
           defaultAmount={record === 'new' ? null : record.defaultAmount}
-          students={students} groups={groups} teachers={teachers} month={month} year={year}
+          students={students} groups={groups} teachers={teachers}
+          month={record !== 'new' && record.month ? record.month : month}
+          year={record !== 'new' && record.year ? record.year : year}
           onClose={() => setRecord(null)}
           onSaved={() => { setRecord(null); fetchAll() }}
         />
