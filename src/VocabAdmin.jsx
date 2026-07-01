@@ -76,7 +76,7 @@ async function aiTranslate(word) {
       'anthropic-dangerous-direct-browser-access': 'true',
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 80,
       system: 'You are a translator. Reply ONLY with a JSON object, no markdown, no explanation.',
       messages: [{
