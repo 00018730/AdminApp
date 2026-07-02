@@ -84,6 +84,7 @@ function NotificationsView() {
 
 export default function ManagerApp({ session, onLogout, isCEO = false }) {
   const [section,    setSection]    = useState('payments')
+  const [studentsGroup, setStudentsGroup] = useState(null)
   const [showLogout, setShowLogout] = useState(false)
   const nav   = isCEO ? [...NAV, CEO_NAV_EXTRA] : NAV
   const brand = isCEO ? 'CEO Panel' : 'Manager Panel'
@@ -154,11 +155,11 @@ export default function ManagerApp({ session, onLogout, isCEO = false }) {
           {section === 'holidays'      && <HolidaysSection canDelete={isCEO} />}
           {section === 'requests'      && <RequestsSection canDelete={isCEO} />}
           {section === 'students'      && <StudentsListSection role={isCEO ? 'ceo' : 'manager'} />}
-          {section === 'groupstudents' && <StudentsSection canDelete={isCEO} />}
+          {section === 'groupstudents' && <StudentsSection initialGroup={studentsGroup} onExit={() => { setStudentsGroup(null); setSection('groups') }} />}
           {section === 'parents'       && <ParentsSection role={isCEO ? 'ceo' : 'manager'} />}
           {section === 'teachers'      && <TeachersSection role={isCEO ? 'ceo' : 'manager'} />}
           {section === 'books'         && <BooksSection canDelete={isCEO} />}
-          {section === 'groups'        && <GroupsSection onNavigate={setSection} canDelete={isCEO} />}
+          {section === 'groups'        && <GroupsSection onOpenStudents={(g) => { setStudentsGroup(g); setSection('groupstudents') }} />}
           {section === 'notifications' && <NotificationsView />}
           {section === 'finance'       && <FinanceSection role={isCEO ? 'ceo' : 'manager'} />}
         </main>
