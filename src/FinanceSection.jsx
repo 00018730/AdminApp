@@ -7,6 +7,19 @@ const D = '#002b2a'
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']
 const CATEGORIES = ['Rent','Utilities','Supplies','Marketing','Maintenance','Taxes','Other']
 
+// Non-teacher staff who get a fixed monthly salary (typed by the CEO).
+// roleFromColumn tables hold several roles distinguished by their `role` column.
+const OTHER_SALARY_SOURCES = [
+  { table:'mentors',  label:'Mentor' },
+  { table:'admins',   label:'Administrator' },
+  { table:'managers', label:'Manager' },
+  { table:'academic_staff',       roleFromColumn:true },
+  { table:'administrative_staff', roleFromColumn:true },
+  { table:'solutions_staff',      roleFromColumn:true },
+  { table:'hr_staff',             roleFromColumn:true },
+  { table:'marketing_staff',      roleFromColumn:true },
+]
+
 function fmt(n) { return Number(n || 0).toLocaleString('fr-FR').replace(/\u202f/g,' ') }
 
 const inp = { width:'100%', padding:'10px 12px', borderRadius:'10px', border:'1.5px solid #e4e8e7', fontSize:'14px', color:D, outline:'none', boxSizing:'border-box', fontFamily:"'DM Sans',sans-serif", background:'white' }
@@ -84,36 +97,81 @@ export default function FinanceSection({ role }) {
   const [year,  setYear]  = useState(now.getFullYear())
   const [payments, setPayments] = useState([])
   const [teachers, setTeachers] = useState([])
+  const [otherStaff, setOtherStaff] = useState([])   // non-teacher salaried staff
   const [expenses, setExpenses] = useState([])
-  const [pctDraft, setPctDraft] = useState({})   // username → editing value
+  const [pctDraft, setPctDraft] = useState({})   // teacher username → editing %
+  const [monthPercents, setMonthPercents] = useState({})  // username → this month's saved %
+  const [amtDraft, setAmtDraft] = useState({})   // staff key → editing amount
   const [loading,  setLoading]  = useState(true)
   const [showExpense, setShowExpense] = useState(null)  // 'new' | expense
   const [savingPct, setSavingPct] = useState(null)
+  const [savingAmt, setSavingAmt] = useState(null)
+
+  // Only the CEO can count/edit salaries; managers see them read-only.
+  const canEditSalaries = role === 'ceo'
 
   useEffect(() => { fetchAll() }, [month, year])
 
   const fetchAll = async () => {
     setLoading(true)
-    const [{ data: pays }, { data: tchs }, { data: exps }] = await Promise.all([
+    const [{ data: pays }, { data: tchs }, { data: exps }, { data: tsp }] = await Promise.all([
       supabase.from('payments').select('teacher_username,amount').eq('payment_month', month).eq('payment_year', year),
-      supabase.from('teachers').select('username,full_name,salary_percent').neq('username','test').order('full_name'),
+      supabase.from('teachers').select('username,full_name').neq('username','test').order('full_name'),
       supabase.from('expenses').select('*').eq('month', month).eq('year', year).order('expense_date', { ascending:false }),
+      supabase.from('teacher_salary_percents').select('teacher_username,percent').eq('month', month).eq('year', year),
     ])
     setPayments(pays || []); setTeachers(tchs || []); setExpenses(exps || [])
-    const draft = {}; (tchs || []).forEach(t => { draft[t.username] = t.salary_percent ?? '' })
+    // this month's saved percentages (empty at the start of a new month)
+    const mp = {}; (tsp || []).forEach(r => { mp[r.teacher_username] = Number(r.percent) })
+    setMonthPercents(mp)
+    const draft = {}; (tchs || []).forEach(t => { draft[t.username] = t.username in mp ? mp[t.username] : '' })
     setPctDraft(draft)
+
+    // Other salaried staff (non-teachers) across their tables
+    const staffResults = await Promise.all(OTHER_SALARY_SOURCES.map(s =>
+      supabase.from(s.table).select(s.roleFromColumn ? 'username,full_name,role,salary_amount' : 'username,full_name,salary_amount').neq('username','test').order('full_name')
+    ))
+    const staff = []
+    OTHER_SALARY_SOURCES.forEach((s, i) => {
+      (staffResults[i].data || []).forEach(p => {
+        staff.push({ key:`${s.table}:${p.username}`, table:s.table, username:p.username, full_name:p.full_name || p.username, roleLabel: s.roleFromColumn ? (p.role || 'Staff') : s.label, salary_amount: p.salary_amount ?? null })
+      })
+    })
+    setOtherStaff(staff)
+    const adraft = {}; staff.forEach(p => { adraft[p.key] = p.salary_amount ?? '' })
+    setAmtDraft(adraft)
     setLoading(false)
+  }
+
+  const saveAmt = async (p) => {
+    const raw = amtDraft[p.key]
+    const val = raw === '' ? null : Number(raw)
+    if (val === (p.salary_amount ?? null)) return
+    if (val != null && (isNaN(val) || val < 0)) return
+    setSavingAmt(p.key)
+    await supabase.from(p.table).update({ salary_amount: val }).eq('username', p.username)
+    logEdit({ action:'update', target_table:p.table, target_id:p.username, summary:`Set ${p.full_name} (${p.roleLabel}) salary to ${fmt(val || 0)} UZS` })
+    setOtherStaff(prev => prev.map(x => x.key === p.key ? { ...x, salary_amount: val } : x))
+    setSavingAmt(null)
   }
 
   const savePct = async (t) => {
     const raw = pctDraft[t.username]
     const val = raw === '' ? null : Number(raw)
-    if (val === (t.salary_percent ?? null)) return
+    const current = t.username in monthPercents ? monthPercents[t.username] : null
+    if (val === current) return
     if (val != null && (isNaN(val) || val < 0 || val > 100)) return
     setSavingPct(t.username)
-    await supabase.from('teachers').update({ salary_percent: val }).eq('username', t.username)
-    logEdit({ action:'update', target_table:'teachers', target_id:t.username, summary:`Set ${t.full_name} salary % to ${val ?? 0}%` })
-    setTeachers(prev => prev.map(x => x.username === t.username ? { ...x, salary_percent: val } : x))
+    if (val == null) {
+      await supabase.from('teacher_salary_percents').delete().eq('teacher_username', t.username).eq('month', month).eq('year', year)
+    } else {
+      await supabase.from('teacher_salary_percents').upsert(
+        { teacher_username: t.username, month, year, percent: val },
+        { onConflict: 'teacher_username,month,year' }
+      )
+    }
+    logEdit({ action:'update', target_table:'teacher_salary_percents', target_id:`${t.username}:${year}-${month}`, summary:`Set ${t.full_name} salary % to ${val ?? 0}% for ${MONTHS[month-1]} ${year}` })
+    setMonthPercents(prev => { const n = { ...prev }; if (val == null) delete n[t.username]; else n[t.username] = val; return n })
     setSavingPct(null)
   }
 
@@ -130,10 +188,13 @@ export default function FinanceSection({ role }) {
   payments.forEach(p => { if (p.teacher_username) paidByTeacher[p.teacher_username] = (paidByTeacher[p.teacher_username] || 0) + Number(p.amount || 0) })
   const teacherRows = teachers.map(t => {
     const collected = paidByTeacher[t.username] || 0
-    const pct = Number(t.salary_percent || 0)
+    const pct = Number(monthPercents[t.username] || 0)
     return { ...t, collected, pct, salary: Math.round(collected * pct / 100) }
   })
-  const totalSalaries = teacherRows.reduce((a, r) => a + r.salary, 0)
+  const percentsSet = Object.keys(monthPercents).length > 0   // any % set for this month?
+  const totalTeacherSalaries = teacherRows.reduce((a, r) => a + r.salary, 0)
+  const totalOtherSalaries   = otherStaff.reduce((a, p) => a + Number(p.salary_amount || 0), 0)
+  const totalSalaries = totalTeacherSalaries + totalOtherSalaries
   const totalExpenses = expenses.reduce((a, e) => a + Number(e.amount || 0), 0)
   const grossBalance  = income - totalExpenses
   const netBalance    = income - totalExpenses - totalSalaries
@@ -170,7 +231,7 @@ export default function FinanceSection({ role }) {
       {/* Summary cards */}
       <div style={{ display:'flex', gap:'14px', flexWrap:'wrap', marginBottom:'14px' }}>
         <Card label="Income"   value={income}        color={G} sub="payments collected" />
-        <Card label="Salaries" value={totalSalaries} color="#8b5cf6" sub="teacher cut" />
+        <Card label="Salaries" value={totalSalaries} color="#8b5cf6" sub="teachers + others" />
         <Card label="Expenses" value={totalExpenses} color="#ef4444" sub={`${expenses.length} item${expenses.length!==1?'s':''}`} />
       </div>
       <div style={{ display:'flex', gap:'14px', flexWrap:'wrap', marginBottom:'28px' }}>
@@ -180,6 +241,16 @@ export default function FinanceSection({ role }) {
 
       {/* Teacher salaries */}
       <div style={{ fontSize:'15px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif", marginBottom:'12px' }}>Teacher salaries</div>
+      {!loading && !percentsSet && (
+        <div style={{ background:'#fff7ed', border:'1.5px solid #fed7aa', borderRadius:'12px', padding:'12px 16px', marginBottom:'12px', display:'flex', alignItems:'center', gap:'10px' }}>
+          <span style={{ fontSize:'18px' }}>📌</span>
+          <span style={{ fontSize:'13px', fontWeight:'700', color:'#92400e' }}>
+            {canEditSalaries
+              ? `Set salary percentages for teachers for ${MONTHS[month-1]} ${year}.`
+              : `Salary percentages for ${MONTHS[month-1]} ${year} haven't been set yet.`}
+          </span>
+        </div>
+      )}
       <div style={{ background:'white', borderRadius:'14px', border:'1.5px solid #e4e8e7', overflow:'hidden', marginBottom:'28px' }}>
         <div style={{ overflowX:'auto' }}>
           <table style={{ width:'100%', borderCollapse:'collapse', minWidth:'620px' }}>
@@ -196,13 +267,17 @@ export default function FinanceSection({ role }) {
                   <td style={{ ...td, fontWeight:'700' }}>{t.full_name}</td>
                   <td style={td}>{fmt(t.collected)} UZS</td>
                   <td style={td}>
-                    <div style={{ display:'flex', alignItems:'center', gap:'6px' }}>
-                      <input type="number" min="0" max="100" value={pctDraft[t.username] ?? ''} onChange={e => setPctDraft(d => ({ ...d, [t.username]: e.target.value }))}
-                        onBlur={() => savePct(t)} onKeyDown={e => e.key==='Enter' && e.currentTarget.blur()}
-                        placeholder="0" style={{ width:'64px', padding:'6px 8px', borderRadius:'8px', border:'1.5px solid #e4e8e7', fontSize:'13px', color:D, outline:'none', textAlign:'center' }} />
-                      <span style={{ color:'#94a3b8', fontSize:'13px' }}>%</span>
-                      {savingPct===t.username && <span style={{ fontSize:'11px', color:'#94a3b8' }}>saving…</span>}
-                    </div>
+                    {canEditSalaries ? (
+                      <div style={{ display:'flex', alignItems:'center', gap:'6px' }}>
+                        <input type="number" min="0" max="100" value={pctDraft[t.username] ?? ''} onChange={e => setPctDraft(d => ({ ...d, [t.username]: e.target.value }))}
+                          onBlur={() => savePct(t)} onKeyDown={e => e.key==='Enter' && e.currentTarget.blur()}
+                          placeholder="0" style={{ width:'64px', padding:'6px 8px', borderRadius:'8px', border:'1.5px solid #e4e8e7', fontSize:'13px', color:D, outline:'none', textAlign:'center' }} />
+                        <span style={{ color:'#94a3b8', fontSize:'13px' }}>%</span>
+                        {savingPct===t.username && <span style={{ fontSize:'11px', color:'#94a3b8' }}>saving…</span>}
+                      </div>
+                    ) : (
+                      <span style={{ color:'#64748b' }}>{t.pct}%</span>
+                    )}
                   </td>
                   <td style={{ ...td, fontWeight:'800', color:'#8b5cf6', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>{fmt(t.salary)} UZS</td>
                 </tr>
@@ -210,7 +285,50 @@ export default function FinanceSection({ role }) {
               {!loading && teacherRows.length > 0 && (
                 <tr style={{ background:'#f8fafb', borderTop:'2px solid #e4e8e7' }}>
                   <td style={{ ...td, fontWeight:'800' }}>Total</td><td style={td}></td><td style={td}></td>
-                  <td style={{ ...td, fontWeight:'800', color:'#8b5cf6', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>{fmt(totalSalaries)} UZS</td>
+                  <td style={{ ...td, fontWeight:'800', color:'#8b5cf6', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>{fmt(totalTeacherSalaries)} UZS</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Other salaries (mentors, admins, managers, new roles) — fixed monthly */}
+      <div style={{ fontSize:'15px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif", marginBottom:'12px' }}>Other salaries</div>
+      <div style={{ background:'white', borderRadius:'14px', border:'1.5px solid #e4e8e7', overflow:'hidden', marginBottom:'28px' }}>
+        <div style={{ overflowX:'auto' }}>
+          <table style={{ width:'100%', borderCollapse:'collapse', minWidth:'620px' }}>
+            <thead><tr style={{ background:'#f8fafb', borderBottom:'1.5px solid #e4e8e7' }}>
+              <th style={th}>Staff</th><th style={th}>Role</th><th style={th}>Monthly salary</th>
+            </tr></thead>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan={3} style={{ padding:'40px', textAlign:'center', color:'#94a3b8' }}>Loading…</td></tr>
+              ) : otherStaff.length === 0 ? (
+                <tr><td colSpan={3} style={{ padding:'40px', textAlign:'center', color:'#94a3b8' }}>No other staff yet.</td></tr>
+              ) : otherStaff.map((p, i) => (
+                <tr key={p.key} style={{ borderBottom:i<otherStaff.length-1?'1px solid #f0f2f1':'none' }}>
+                  <td style={{ ...td, fontWeight:'700' }}>{p.full_name}</td>
+                  <td style={td}><span style={{ fontSize:'11px', fontWeight:'700', padding:'2px 9px', borderRadius:'20px', background:'#f0f2f1', color:'#64748b' }}>{p.roleLabel}</span></td>
+                  <td style={td}>
+                    {canEditSalaries ? (
+                      <div style={{ display:'flex', alignItems:'center', gap:'6px' }}>
+                        <input type="number" min="0" value={amtDraft[p.key] ?? ''} onChange={e => setAmtDraft(d => ({ ...d, [p.key]: e.target.value }))}
+                          onBlur={() => saveAmt(p)} onKeyDown={e => e.key==='Enter' && e.currentTarget.blur()}
+                          placeholder="0" style={{ width:'130px', padding:'6px 8px', borderRadius:'8px', border:'1.5px solid #e4e8e7', fontSize:'13px', color:D, outline:'none', textAlign:'right' }} />
+                        <span style={{ color:'#94a3b8', fontSize:'13px' }}>UZS</span>
+                        {savingAmt===p.key && <span style={{ fontSize:'11px', color:'#94a3b8' }}>saving…</span>}
+                      </div>
+                    ) : (
+                      <span style={{ fontWeight:'700', color:'#8b5cf6', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>{fmt(p.salary_amount || 0)} UZS</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {!loading && otherStaff.length > 0 && (
+                <tr style={{ background:'#f8fafb', borderTop:'2px solid #e4e8e7' }}>
+                  <td style={{ ...td, fontWeight:'800' }}>Total</td><td style={td}></td>
+                  <td style={{ ...td, fontWeight:'800', color:'#8b5cf6', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>{fmt(totalOtherSalaries)} UZS</td>
                 </tr>
               )}
             </tbody>
