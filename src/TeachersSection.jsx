@@ -193,7 +193,7 @@ function AddStaffModal({ group, onClose, onSaved }) {
     }
     const payload = {
       username: form.username.trim(), password: form.password, full_name: form.full_name.trim(),
-      role: group.roleValue, ...buildContactPayload(form, finalCertUrl),
+      ...(group.roleValue ? { role: group.roleValue } : {}), ...buildContactPayload(form, finalCertUrl),
     }
     const { error: err } = await supabase.from(group.table).insert(payload)
     if (err) { setError(err.code === '23505' ? 'That username already exists.' : err.message); setSaving(false); return }
@@ -392,14 +392,14 @@ export default function TeachersSection({ role, readOnly = false }) {
                   <span style={{ fontSize:'15px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>{g.single}</span>
                   <span style={{ fontSize:'11px', fontFamily:'monospace', background:'#f0f2f1', color:'#94a3b8', padding:'1px 8px', borderRadius:'20px' }}>{list.length}</span>
                 </div>
-                {canWrite && !g.existing && (
+                {canWrite && (
                   <button onClick={() => setAdding(g)} style={{ padding:'7px 14px', borderRadius:'8px', border:'none', background:G, color:'white', fontSize:'12px', fontWeight:'700', cursor:'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>+ Add {g.single}</button>
                 )}
               </div>
 
               {list.length === 0 ? (
                 <div style={{ background:'white', borderRadius:'12px', border:'1.5px solid #f0f2f1', padding:'22px', textAlign:'center', fontSize:'13px', color:'#94a3b8' }}>
-                  {g.existing ? `No ${g.single.toLowerCase()}s yet — accounts are created via login setup.` : `No ${g.single.toLowerCase()} yet.`}
+                  {`No ${g.single.toLowerCase()} yet.`}
                 </div>
               ) : (
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(310px, 1fr))', gap:'14px' }}>
