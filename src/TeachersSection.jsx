@@ -399,12 +399,6 @@ function MemberCard({ person, group, activeStudents, canWrite, onEdit, onDelete 
             <div style={{ fontSize:'16px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', color:D, lineHeight:1.2 }}>{person.full_name || person.username}</div>
             <div style={{ fontSize:'12px', color:'#94a3b8', marginTop:'2px', fontFamily:'monospace' }}>@{person.username}</div>
           </div>
-          {group.students && activeStudents != null && (
-            <div style={{ textAlign:'center', flexShrink:0 }}>
-              <div style={{ fontSize:'18px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>{activeStudents}</div>
-              <div style={{ fontSize:'10px', color:'#94a3b8', fontWeight:'600' }}>students</div>
-            </div>
-          )}
         </div>
 
         {filled ? (
@@ -465,7 +459,6 @@ export default function TeachersSection({ role, readOnly = false }) {
     setLoading(false)
   }
 
-  const activeCountFor = (username) => students.filter(s => s.teacher_username === username && s.status !== 'left').length
   const groupList = (g) => {
     const rows = byTable[g.table] || []
     return g.existing ? rows : rows.filter(p => p.role === g.roleValue)
@@ -528,7 +521,6 @@ export default function TeachersSection({ role, readOnly = false }) {
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(310px, 1fr))', gap:'14px' }}>
                   {list.map(p => (
                     <MemberCard key={p.username} person={p} group={g}
-                      activeStudents={g.students ? activeCountFor(p.username) : null}
                       canWrite={canWrite}
                       onEdit={() => setEditing({ person:p, group:g })}
                       onDelete={() => del(g, p)} />
