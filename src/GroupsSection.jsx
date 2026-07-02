@@ -289,7 +289,7 @@ export default function GroupsSection({ readOnly = false, onNavigate = null, onO
     const [{ data: t }, { data: g }, { data: s }] = await Promise.all([
       supabase.from('teachers').select('username, full_name').neq('username', 'test').order('full_name'),
       supabase.from('groups').select('*'),
-      supabase.from('students').select('teacher_username, day, class_time'),
+      supabase.from('students').select('teacher_username, day, class_time').neq('status', 'left'),
     ])
     const counts = {}
     for (const x of s || []) { const key=`${x.teacher_username}_${x.day}_${x.class_time}`; counts[key]=(counts[key]||0)+1 }

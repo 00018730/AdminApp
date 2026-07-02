@@ -301,7 +301,7 @@ export default function StudentsSection({ readOnly = false, initialGroup = null,
     setLoading(true)
     const [{ data: g }, { data: s }] = await Promise.all([
       supabase.from('groups').select('*').eq('teacher_username', teacher.username).order('day').order('class_time'),
-      supabase.from('students').select('day, class_time').eq('teacher_username', teacher.username),
+      supabase.from('students').select('day, class_time').eq('teacher_username', teacher.username).neq('status', 'left'),
     ])
     const counts = {}
     for (const x of s||[]) { const k=`${x.day}_${x.class_time}`; counts[k]=(counts[k]||0)+1 }
@@ -313,6 +313,7 @@ export default function StudentsSection({ readOnly = false, initialGroup = null,
     setLoading(true)
     const { data } = await supabase.from('students').select('*')
       .eq('teacher_username', group.teacher_username).eq('day', group.day).eq('class_time', group.class_time)
+      .neq('status', 'left')
       .order('full_name')
     setStudents(data || []); setLoading(false)
   }

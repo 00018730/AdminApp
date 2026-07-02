@@ -24,6 +24,7 @@ export default function StudentsListSection({ role }) {
   const [parents,  setParents]  = useState({})   // student_username → parent
   const [loading,  setLoading]  = useState(true)
   const [search,   setSearch]   = useState('')
+  const [tab,      setTab]      = useState('active')  // 'active' | 'left'
   const [busy,     setBusy]     = useState(null)  // username being assigned
 
   useEffect(() => { fetchAll() }, [])
@@ -79,7 +80,12 @@ export default function StudentsListSection({ role }) {
   }
 
   const q = search.trim().toLowerCase()
+  const inTab = (s) => tab === 'left' ? s.status === 'left' : s.status !== 'left'
+  const activeCount = students.filter(s => s.status !== 'left').length
+  const leftCount   = students.filter(s => s.status === 'left').length
+
   const filtered = students.filter(s => {
+    if (!inTab(s)) return false
     if (!q) return true
     const parent = parents[s.username]
     return (
@@ -97,8 +103,9 @@ export default function StudentsListSection({ role }) {
     return (a.full_name || '').localeCompare(b.full_name || '')
   })
 
-  const numbered   = students.filter(s => s.contract_number).length
-  const unnumbered = students.length - numbered
+  const tabStudents = students.filter(inTab)
+  const numbered   = tabStudents.filter(s => s.contract_number).length
+  const unnumbered = tabStudents.length - numbered
 
   const th = { padding:'11px 14px', textAlign:'left', fontSize:'11px', fontWeight:'700', color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.05em', whiteSpace:'nowrap' }
   const td = { padding:'12px 14px', fontSize:'13px', color:D, verticalAlign:'middle' }
@@ -107,10 +114,26 @@ export default function StudentsListSection({ role }) {
 
   return (
     <div style={{ fontFamily:"'DM Sans',sans-serif" }}>
+      {/* Tabs */}
+      <div style={{ display:'flex', gap:'8px', marginBottom:'18px' }}>
+        {[
+          { id:'active', label:'Active students', count:activeCount },
+          { id:'left',   label:'Left students',   count:leftCount },
+        ].map(t => {
+          const on = tab === t.id
+          return (
+            <button key={t.id} onClick={() => setTab(t.id)}
+              style={{ padding:'9px 18px', borderRadius:'999px', border:`2px solid ${on?G:'#e4e8e7'}`, background:on?G:'white', color:on?'white':D, fontSize:'13px', fontWeight:'700', cursor:'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif", boxShadow:on?`0 3px 12px ${G}35`:'none' }}>
+              {t.label} <span style={{ opacity:0.75 }}>· {loading ? '…' : t.count}</span>
+            </button>
+          )
+        })}
+      </div>
+
       {/* Stats */}
       <div style={{ display:'flex', gap:'12px', marginBottom:'20px', flexWrap:'wrap' }}>
         {[
-          { label:'Total students', value:students.length, color:D },
+          { label: tab==='left' ? 'Left students' : 'Active students', value:tabStudents.length, color:D },
           { label:'With contract #', value:numbered,       color:G },
           { label:'Awaiting #',      value:unnumbered,      color:'#f59e0b' },
         ].map(s => (
@@ -175,7 +198,7 @@ export default function StudentsListSection({ role }) {
               })}
               {!sorted.length && (
                 <tr><td colSpan={7} style={{ padding:'48px', textAlign:'center', color:'#94a3b8' }}>
-                  {search ? 'No students match your search.' : 'No students yet.'}
+                  {search ? 'No students match your search.' : (tab==='left' ? 'No left students.' : 'No active students yet.')}
                 </td></tr>
               )}
             </tbody>
