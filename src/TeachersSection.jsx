@@ -124,6 +124,107 @@ function buildContactPayload(form, finalCertUrl) {
   }
 }
 
+const AVATAR_BUCKET = 'staff-avatars'
+
+// Upload a cropped avatar blob; returns its public URL (or null on failure).
+async function uploadAvatar(table, username, file) {
+  const path = `${table}_${username}_${Date.now()}.jpg`
+  const { data: up, error } = await supabase.storage.from(AVATAR_BUCKET).upload(path, file, { upsert: true, contentType: 'image/jpeg' })
+  if (error) throw error
+  return supabase.storage.from(AVATAR_BUCKET).getPublicUrl(up.path).data.publicUrl
+}
+
+// ── Square crop modal: pan + zoom, exports a 400×400 JPEG ────────────────────
+const CROP_V = 280, CROP_OUT = 400
+function ImageCropModal({ src, onCancel, onCrop }) {
+  const imgRef = useRef(null)
+  const [nat, setNat]     = useState(null)     // { w, h, base }
+  const [zoom, setZoom]   = useState(1)
+  const [pos, setPos]     = useState({ x:0, y:0 })
+  const drag = useRef(null)
+  const [busy, setBusy]   = useState(false)
+
+  const clamp = (p, base, z) => {
+    const dw = nat ? nat.w * base * z : 0, dh = nat ? nat.h * base * z : 0
+    return { x: Math.min(0, Math.max(CROP_V - dw, p.x)), y: Math.min(0, Math.max(CROP_V - dh, p.y)) }
+  }
+  const onImgLoad = (e) => {
+    const w = e.target.naturalWidth, h = e.target.naturalHeight
+    const base = Math.max(CROP_V / w, CROP_V / h)
+    setNat({ w, h, base })
+    const dw = w * base, dh = h * base
+    setPos({ x:(CROP_V - dw)/2, y:(CROP_V - dh)/2 })
+    setZoom(1)
+  }
+  const startDrag = (e) => { drag.current = { sx: e.clientX, sy: e.clientY, px: pos.x, py: pos.y }; e.currentTarget.setPointerCapture?.(e.pointerId) }
+  const moveDrag  = (e) => {
+    if (!drag.current || !nat) return
+    const nx = drag.current.px + (e.clientX - drag.current.sx)
+    const ny = drag.current.py + (e.clientY - drag.current.sy)
+    setPos(clamp({ x:nx, y:ny }, nat.base, zoom))
+  }
+  const endDrag = () => { drag.current = null }
+  const changeZoom = (z) => { setZoom(z); if (nat) setPos(p => clamp(p, nat.base, z)) }
+
+  const confirm = () => {
+    if (!nat) return
+    setBusy(true)
+    const s = nat.base * zoom
+    const sx = -pos.x / s, sy = -pos.y / s, sSize = CROP_V / s
+    const canvas = document.createElement('canvas')
+    canvas.width = CROP_OUT; canvas.height = CROP_OUT
+    const ctx = canvas.getContext('2d')
+    ctx.drawImage(imgRef.current, sx, sy, sSize, sSize, 0, 0, CROP_OUT, CROP_OUT)
+    canvas.toBlob(b => { setBusy(false); onCrop(new File([b], 'avatar.jpg', { type:'image/jpeg' })) }, 'image/jpeg', 0.9)
+  }
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:400, padding:'24px', fontFamily:"'DM Sans',sans-serif" }}
+      onClick={e => e.target===e.currentTarget && onCancel()}>
+      <div style={{ background:'white', borderRadius:'18px', padding:'22px', width:'100%', maxWidth:'340px', boxShadow:'0 24px 64px rgba(0,0,0,0.25)' }}>
+        <div style={{ fontSize:'16px', fontWeight:'800', color:D, fontFamily:"'Plus Jakarta Sans',sans-serif", marginBottom:'14px', textAlign:'center' }}>Adjust photo</div>
+        <div style={{ width:CROP_V, height:CROP_V, margin:'0 auto', borderRadius:'50%', overflow:'hidden', position:'relative', background:'#f0f2f1', touchAction:'none', cursor:'grab', userSelect:'none' }}
+          onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerLeave={endDrag}>
+          <img ref={imgRef} src={src} alt="" onLoad={onImgLoad} draggable={false}
+            style={{ position:'absolute', left:pos.x, top:pos.y, width: nat ? nat.w*nat.base*zoom : 'auto', height: nat ? nat.h*nat.base*zoom : 'auto', maxWidth:'none', pointerEvents:'none' }} />
+          <div style={{ position:'absolute', inset:0, boxShadow:'0 0 0 2000px rgba(0,0,0,0.04) inset', borderRadius:'50%', pointerEvents:'none' }} />
+        </div>
+        <div style={{ display:'flex', alignItems:'center', gap:'10px', margin:'16px 0' }}>
+          <span style={{ fontSize:'13px' }}>🔍</span>
+          <input type="range" min="1" max="3" step="0.01" value={zoom} onChange={e => changeZoom(Number(e.target.value))} style={{ flex:1, accentColor:G }} />
+        </div>
+        <div style={{ display:'flex', gap:'10px' }}>
+          <button onClick={onCancel} style={{ flex:1, padding:'11px', borderRadius:'10px', border:'1.5px solid #e4e8e7', background:'white', color:'#64748b', fontSize:'14px', fontWeight:'600', cursor:'pointer' }}>Cancel</button>
+          <button onClick={confirm} disabled={busy || !nat} style={{ flex:2, padding:'11px', borderRadius:'10px', border:'none', background:G, color:'white', fontSize:'14px', fontWeight:'700', cursor:'pointer', fontFamily:"'Plus Jakarta Sans',sans-serif" }}>
+            {busy ? 'Saving…' : 'Use photo'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Clickable avatar that opens the crop modal; reports the cropped file up ──
+function AvatarEditor({ initials, color, previewUrl, onCropped }) {
+  const fileRef = useRef(null)
+  const [cropSrc, setCropSrc] = useState(null)
+  const pick = (e) => { const f = e.target.files?.[0]; if (f) setCropSrc(URL.createObjectURL(f)); e.target.value = '' }
+  return (
+    <>
+      <button type="button" onClick={() => fileRef.current?.click()} title="Change photo"
+        style={{ width:'64px', height:'64px', borderRadius:'16px', border:'none', padding:0, cursor:'pointer', position:'relative', overflow:'hidden', flexShrink:0, background:`${color}15` }}>
+        {previewUrl
+          ? <img src={previewUrl} alt="" style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }} />
+          : <span style={{ display:'flex', width:'100%', height:'100%', alignItems:'center', justifyContent:'center', fontSize:'20px', fontWeight:'800', color, fontFamily:"'Plus Jakarta Sans',sans-serif" }}>{initials}</span>}
+        <span style={{ position:'absolute', bottom:0, left:0, right:0, background:'rgba(0,0,0,0.55)', color:'white', fontSize:'9px', fontWeight:'700', padding:'2px 0', textAlign:'center' }}>Edit</span>
+      </button>
+      <input ref={fileRef} type="file" accept="image/*" style={{ display:'none' }} onChange={pick} />
+      {cropSrc && <ImageCropModal src={cropSrc} onCancel={() => setCropSrc(null)} onCrop={(file) => { setCropSrc(null); onCropped(file, URL.createObjectURL(file)) }} />}
+    </>
+  )
+}
+
+
 // ════════════════════════════════════════════════════════════════════════════
 // EDIT CONTACT MODAL — contact details only, keyed by username
 // ════════════════════════════════════════════════════════════════════════════
@@ -135,6 +236,8 @@ function ContactModal({ person, group, onClose, onSaved }) {
   })
   const [certFile, setCertFile] = useState(null)
   const [certUrl,  setCertUrl]  = useState(person.ielts_certificate_url || null)
+  const [avatarFile, setAvatarFile] = useState(null)
+  const [avatarPreview, setAvatarPreview] = useState(person.avatar_url || null)
   const [saving,   setSaving]   = useState(false)
   const [error,    setError]    = useState('')
   const fileRef = useRef(null)
@@ -150,14 +253,21 @@ function ContactModal({ person, group, onClose, onSaved }) {
       if (upErr) { setError('Certificate upload failed: ' + upErr.message); setSaving(false); return }
       finalCertUrl = supabase.storage.from(CERT_BUCKET).getPublicUrl(up.path).data.publicUrl
     }
-    const { error: err } = await supabase.from(group.table).update(buildContactPayload(form, finalCertUrl)).eq('username', person.username)
+    let avatarUrl = person.avatar_url || null
+    if (avatarFile) {
+      try { avatarUrl = await uploadAvatar(group.table, person.username, avatarFile) }
+      catch (e) { setError('Photo upload failed: ' + e.message); setSaving(false); return }
+    }
+    const { error: err } = await supabase.from(group.table).update({ ...buildContactPayload(form, finalCertUrl), avatar_url: avatarUrl }).eq('username', person.username)
     if (err) { setError(err.message); setSaving(false); return }
     logEdit({ action:'update', target_table:group.table, target_id:person.username, summary:`Updated ${group.single} ${person.full_name || person.username} contact details` })
     onSaved()
   }
 
   return (
-    <ModalShell title={person.full_name || person.username} subtitle={`${group.single} · contact details`} color={group.color} initials={initialsOf(person.full_name)} onClose={onClose}>
+    <ModalShell title={person.full_name || person.username} subtitle={`${group.single} · tap photo to change`} color={group.color}
+      avatarSlot={<AvatarEditor initials={initialsOf(person.full_name)} color={group.color} previewUrl={avatarPreview} onCropped={(file, url) => { setAvatarFile(file); setAvatarPreview(url) }} />}
+      onClose={onClose}>
       <ContactFields form={form} set={set} showIelts={!!group.ielts} certFile={certFile} setCertFile={setCertFile} certUrl={certUrl} fileRef={fileRef} />
       {error && <div style={{ color:'#ef4444', fontSize:'13px', fontWeight:'600', marginBottom:'12px' }}>{error}</div>}
       <ModalButtons saving={saving} onClose={onClose} onSave={save} saveLabel="Save contact details" />
@@ -175,6 +285,8 @@ function AddStaffModal({ group, onClose, onSaved }) {
     emergency_relation:'', emergency_name:'', emergency_phone:'',
   })
   const [certFile, setCertFile] = useState(null)
+  const [avatarFile, setAvatarFile] = useState(null)
+  const [avatarPreview, setAvatarPreview] = useState(null)
   const [saving,   setSaving]   = useState(false)
   const [error,    setError]    = useState('')
   const fileRef = useRef(null)
@@ -191,9 +303,14 @@ function AddStaffModal({ group, onClose, onSaved }) {
       if (upErr) { setError('Certificate upload failed: ' + upErr.message); setSaving(false); return }
       finalCertUrl = supabase.storage.from(CERT_BUCKET).getPublicUrl(up.path).data.publicUrl
     }
+    let avatarUrl = null
+    if (avatarFile) {
+      try { avatarUrl = await uploadAvatar(group.table, form.username.trim(), avatarFile) }
+      catch (e) { setError('Photo upload failed: ' + e.message); setSaving(false); return }
+    }
     const payload = {
       username: form.username.trim(), password: form.password, full_name: form.full_name.trim(),
-      ...(group.roleValue ? { role: group.roleValue } : {}), ...buildContactPayload(form, finalCertUrl),
+      ...(group.roleValue ? { role: group.roleValue } : {}), ...buildContactPayload(form, finalCertUrl), avatar_url: avatarUrl,
     }
     const { error: err } = await supabase.from(group.table).insert(payload)
     if (err) { setError(err.code === '23505' ? 'That username already exists.' : err.message); setSaving(false); return }
@@ -202,7 +319,9 @@ function AddStaffModal({ group, onClose, onSaved }) {
   }
 
   return (
-    <ModalShell title={`Add ${group.single}`} subtitle="New staff member" color={group.color} initials="+" onClose={onClose}>
+    <ModalShell title={`Add ${group.single}`} subtitle="New staff member · tap to add photo" color={group.color}
+      avatarSlot={<AvatarEditor initials="+" color={group.color} previewUrl={avatarPreview} onCropped={(file, url) => { setAvatarFile(file); setAvatarPreview(url) }} />}
+      onClose={onClose}>
       <label style={lStyle}>Full name</label>
       <input value={form.full_name} onChange={e => set('full_name', e.target.value)} placeholder="e.g. Dilnoza Karimova" style={iStyle} />
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
@@ -218,13 +337,13 @@ function AddStaffModal({ group, onClose, onSaved }) {
 }
 
 // ── shared modal chrome ──────────────────────────────────────────────────────
-function ModalShell({ title, subtitle, color, initials, onClose, children }) {
+function ModalShell({ title, subtitle, color, initials, avatarSlot, onClose, children }) {
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.45)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:300, padding:'24px', fontFamily:"'DM Sans',sans-serif" }}
       onClick={e => e.target === e.currentTarget && onClose()}>
       <div style={{ background:'white', borderRadius:'18px', padding:'26px', width:'100%', maxWidth:'520px', boxShadow:'0 24px 64px rgba(0,0,0,0.18)', maxHeight:'92vh', overflowY:'auto' }}>
         <div style={{ display:'flex', alignItems:'center', gap:'12px', marginBottom:'18px' }}>
-          <div style={{ width:'44px', height:'44px', borderRadius:'12px', background:`${color}15`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'15px', fontWeight:'800', color, fontFamily:"'Plus Jakarta Sans',sans-serif", flexShrink:0 }}>{initials}</div>
+          {avatarSlot || <div style={{ width:'44px', height:'44px', borderRadius:'12px', background:`${color}15`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'15px', fontWeight:'800', color, fontFamily:"'Plus Jakarta Sans',sans-serif", flexShrink:0 }}>{initials}</div>}
           <div>
             <h3 style={{ fontSize:'17px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', color:D }}>{title}</h3>
             <div style={{ fontSize:'12px', color:'#94a3b8' }}>{subtitle}</div>
@@ -271,7 +390,11 @@ function MemberCard({ person, group, activeStudents, canWrite, onEdit, onDelete 
       <div style={{ height:'5px', background:`linear-gradient(90deg,${D},${color})` }} />
       <div style={{ padding:'18px 20px' }}>
         <div style={{ display:'flex', alignItems:'center', gap:'13px', marginBottom:'14px' }}>
-          <div style={{ width:'50px', height:'50px', borderRadius:'14px', background:`${color}15`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'17px', fontWeight:'800', color, fontFamily:"'Plus Jakarta Sans',sans-serif", flexShrink:0 }}>{initialsOf(person.full_name)}</div>
+          <div style={{ width:'50px', height:'50px', borderRadius:'14px', background:`${color}15`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'17px', fontWeight:'800', color, fontFamily:"'Plus Jakarta Sans',sans-serif", flexShrink:0, overflow:'hidden' }}>
+            {person.avatar_url
+              ? <img src={person.avatar_url} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }} />
+              : initialsOf(person.full_name)}
+          </div>
           <div style={{ flex:1, minWidth:0 }}>
             <div style={{ fontSize:'16px', fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:'800', color:D, lineHeight:1.2 }}>{person.full_name || person.username}</div>
             <div style={{ fontSize:'12px', color:'#94a3b8', marginTop:'2px', fontFamily:'monospace' }}>@{person.username}</div>
